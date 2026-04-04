@@ -49,11 +49,17 @@ label { display:inline-block; width:180px; }
   margin-bottom: 15px;
 }
 #barcodeStatus { margin-top: 10px; color: #94a3b8; }
+.config-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:10px 16px; margin-top:10px; }
+.config-grid label { display:block; width:auto; font-size:13px; color:#cbd5e1; margin-bottom:4px; }
+.config-grid input { width:100%; box-sizing:border-box; margin:0; }
+.config-actions { margin-top:14px; }
+.config-note { font-size:12px; color:#94a3b8; margin-top:8px; }
+#configStatus { margin-top:10px; color:#94a3b8; }
 </style>
 </head>
 <body>
 
-<h2>SEAL PROFILER        DMAN@IOTI</h2>
+<h2>SEAL PROFILER   DMAN@IOTI</h2>
 
 <div class="card" id="loginCard">
   <input id="password" type="password" placeholder="ThingsBoard Password">
@@ -68,6 +74,7 @@ label { display:inline-block; width:180px; }
     <button id="connectPowerPortBtn">Connect Power COM</button>
     <button id="connectIdPortBtn">Connect ID COM</button>
     <button id="connect">Start Test</button>
+    <button id="openConfigBtn" class="warn">Configuration</button>
 
     <div class="statusBox">
       <div>Power Port: <span id="powerPortStatus">Not connected</span></div>
@@ -93,6 +100,19 @@ label { display:inline-block; width:180px; }
 
     <p class="small">ID format expected on second COM port: RSSI:-60 ID:11479E73A94E6B58</p>
     <canvas id="adcChart" height="30"></canvas>
+  </div>
+
+  <div class="card">
+    <h3>Current Configuration</h3>
+    <div class="statusBox">
+      <div>Test Duration: <span id="cfgTestDuration">15000</span> ms</div>
+      <div>ID Window: <span id="cfgIdWindow">-400 / +400</span> ms</div>
+      <div>Sleep Threshold: <span id="cfgSleepThreshold">200</span> µA</div>
+      <div>Burst Threshold: <span id="cfgBurstThreshold">500</span> µA</div>
+      <div>RSSI Filter: <span id="cfgRssiFilter">Off</span></div>
+      <div>RSSI Min: <span id="cfgRssiMin">-70</span> dBm</div>
+      <div>Chart Y Range: <span id="cfgChartRange">1 to 25000</span> µA</div>
+    </div>
   </div>
 
   <div class="card">
@@ -124,6 +144,85 @@ label { display:inline-block; width:180px; }
   </div>
 </div>
 
+
+<div id="configModal" class="modal">
+  <div class="modal-content">
+    <h3>Configuration</h3>
+    <p>Enter the config password to change settings.</p>
+
+    <div id="configPasswordSection">
+      <input id="configPasswordInput" type="password" placeholder="Enter config password">
+      <button id="configUnlockBtn">Unlock</button>
+      <button id="configCloseBtn1" class="secondary">Close</button>
+      <div id="configStatus">Locked</div>
+    </div>
+
+    <div id="configFormSection" class="hidden">
+      <div class="config-grid">
+        <div>
+          <label for="cfg_test_duration_ms">Test Duration (ms)</label>
+          <input id="cfg_test_duration_ms" type="number" min="1000" step="100">
+        </div>
+        <div>
+          <label for="cfg_id_capture_past_ms">ID Capture Past (ms)</label>
+          <input id="cfg_id_capture_past_ms" type="number" min="0" step="10">
+        </div>
+        <div>
+          <label for="cfg_id_capture_future_ms">ID Capture Future (ms)</label>
+          <input id="cfg_id_capture_future_ms" type="number" min="0" step="10">
+        </div>
+        <div>
+          <label for="cfg_id_event_history_ms">ID Event History (ms)</label>
+          <input id="cfg_id_event_history_ms" type="number" min="1000" step="100">
+        </div>
+        <div>
+          <label for="cfg_sleep_threshold_ua">Sleep Threshold (µA)</label>
+          <input id="cfg_sleep_threshold_ua" type="number" min="0.1" step="0.1">
+        </div>
+        <div>
+          <label for="cfg_burst_threshold_ua">Burst Threshold (µA)</label>
+          <input id="cfg_burst_threshold_ua" type="number" min="0.1" step="0.1">
+        </div>
+        <div>
+          <label for="cfg_min_current_ua">Minimum Current Clamp (µA)</label>
+          <input id="cfg_min_current_ua" type="number" min="0.001" step="0.1">
+        </div>
+        <div>
+          <label for="cfg_sleep_window_size">Sleep Window Size</label>
+          <input id="cfg_sleep_window_size" type="number" min="1" step="1">
+        </div>
+        <div>
+          <label for="cfg_enable_rssi_filter">Enable RSSI Filter (0 or 1)</label>
+          <input id="cfg_enable_rssi_filter" type="number" min="0" max="1" step="1">
+        </div>
+        <div>
+          <label for="cfg_rssi_min_dbm">RSSI Minimum (dBm)</label>
+          <input id="cfg_rssi_min_dbm" type="number" step="1">
+        </div>
+        <div>
+          <label for="cfg_chart_max_points">Chart Max Points</label>
+          <input id="cfg_chart_max_points" type="number" min="100" step="100">
+        </div>
+        <div>
+          <label for="cfg_chart_y_min_ua">Chart Y Min (µA)</label>
+          <input id="cfg_chart_y_min_ua" type="number" min="0.001" step="0.1">
+        </div>
+        <div>
+          <label for="cfg_chart_y_max_ua">Chart Y Max (µA)</label>
+          <input id="cfg_chart_y_max_ua" type="number" min="1" step="1">
+        </div>
+      </div>
+      <div class="config-note">These settings are saved on this PC in the browser and will still be there after a restart unless browser data is cleared.</div>
+      <div class="config-actions">
+        <button id="configSaveBtn" class="success">Save Settings</button>
+        <button id="configResetBtn" class="secondary">Reset Defaults</button>
+        <button id="configCloseBtn2" class="secondary">Close</button>
+      </div>
+      <div id="configStatus2" class="config-note"></div>
+    </div>
+  </div>
+</div>
+
 <script>
 // -------- ThingsBoard --------
 const SERVER = "https://thingsboard.intarget.mobi";
@@ -133,30 +232,26 @@ const USERNAME = "dman@ioti.mobi";
 const POWER_PORT_BAUD = 115200;
 const ID_PORT_BAUD = 115200;
 
-// -------- Test timing --------
-const TEST_DURATION_MS = 15000;
+// -------- Persistent configuration --------
+const CONFIG_PASSWORD = "12345";
+const SETTINGS_STORAGE_KEY = "blePowerTestSettings_v1";
+const DEFAULT_SETTINGS = {
+  testDurationMs: 15000,
+  idCapturePastMs: 400,
+  idCaptureFutureMs: 400,
+  idEventHistoryMs: 10000,
+  sleepThresholdUa: 200,
+  burstThresholdUa: 500,
+  minCurrentUa: 0.1,
+  enableRssiFilter: false,
+  rssiMinDbm: -70,
+  chartMaxPoints: 2000,
+  chartYMinUa: 1,
+  chartYMaxUa: 25000,
+  sleepWindowSize: 20
+};
 
-// -------- ID matching window --------
-const ID_CAPTURE_PAST_MS = 400;
-const ID_CAPTURE_FUTURE_MS = 400;
-const ID_EVENT_HISTORY_MS = 10000;
-
-// -------- Electrical thresholds --------
-const SLEEP_THRESHOLD_UA = 200;
-const BURST_THRESHOLD_UA = 500;
-const MIN_CURRENT_UA = 0.1;
-
-// -------- Optional ID filtering --------
-const ENABLE_RSSI_FILTER = false;
-const RSSI_MIN_DBM = -70;
-
-// -------- Chart settings --------
-const CHART_MAX_POINTS = 2000;
-const CHART_Y_MIN_UA = 1;
-const CHART_Y_MAX_UA = 25000;
-
-// -------- Sleep averaging --------
-const SLEEP_WINDOW_SIZE = 20;
+let settings = loadSettings();
 
 // -------- Overall average caps by burst count --------
 const OVERALL_CAP_RULES = [
@@ -184,6 +279,116 @@ let idCaptureWindowActive = false;
 let idCaptureWindowEnd = 0;
 let idWindowEvents = [];
 let matchedIdThisTest = null;
+
+function loadSettings() {
+  try {
+    const saved = localStorage.getItem(SETTINGS_STORAGE_KEY);
+    if (!saved) return { ...DEFAULT_SETTINGS };
+    const parsed = JSON.parse(saved);
+    return { ...DEFAULT_SETTINGS, ...parsed };
+  } catch (e) {
+    console.warn("Failed to load settings, using defaults", e);
+    return { ...DEFAULT_SETTINGS };
+  }
+}
+
+function saveSettings() {
+  localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+}
+
+function sanitizeSettings(obj) {
+  return {
+    testDurationMs: Math.max(1000, Number(obj.testDurationMs) || DEFAULT_SETTINGS.testDurationMs),
+    idCapturePastMs: Math.max(0, Number(obj.idCapturePastMs) || 0),
+    idCaptureFutureMs: Math.max(0, Number(obj.idCaptureFutureMs) || 0),
+    idEventHistoryMs: Math.max(1000, Number(obj.idEventHistoryMs) || DEFAULT_SETTINGS.idEventHistoryMs),
+    sleepThresholdUa: Math.max(0.1, Number(obj.sleepThresholdUa) || DEFAULT_SETTINGS.sleepThresholdUa),
+    burstThresholdUa: Math.max(0.1, Number(obj.burstThresholdUa) || DEFAULT_SETTINGS.burstThresholdUa),
+    minCurrentUa: Math.max(0.001, Number(obj.minCurrentUa) || DEFAULT_SETTINGS.minCurrentUa),
+    enableRssiFilter: !!Number(obj.enableRssiFilter),
+    rssiMinDbm: Number.isFinite(Number(obj.rssiMinDbm)) ? Number(obj.rssiMinDbm) : DEFAULT_SETTINGS.rssiMinDbm,
+    chartMaxPoints: Math.max(100, Number(obj.chartMaxPoints) || DEFAULT_SETTINGS.chartMaxPoints),
+    chartYMinUa: Math.max(0.001, Number(obj.chartYMinUa) || DEFAULT_SETTINGS.chartYMinUa),
+    chartYMaxUa: Math.max(1, Number(obj.chartYMaxUa) || DEFAULT_SETTINGS.chartYMaxUa),
+    sleepWindowSize: Math.max(1, Math.round(Number(obj.sleepWindowSize) || DEFAULT_SETTINGS.sleepWindowSize))
+  };
+}
+
+function updateConfigSummary() {
+  document.getElementById("cfgTestDuration").innerText = settings.testDurationMs;
+  document.getElementById("cfgIdWindow").innerText = `-${settings.idCapturePastMs} / +${settings.idCaptureFutureMs}`;
+  document.getElementById("cfgSleepThreshold").innerText = settings.sleepThresholdUa;
+  document.getElementById("cfgBurstThreshold").innerText = settings.burstThresholdUa;
+  document.getElementById("cfgRssiFilter").innerText = settings.enableRssiFilter ? "On" : "Off";
+  document.getElementById("cfgRssiMin").innerText = settings.rssiMinDbm;
+  document.getElementById("cfgChartRange").innerText = `${settings.chartYMinUa} to ${settings.chartYMaxUa}`;
+}
+
+function populateConfigForm() {
+  document.getElementById("cfg_test_duration_ms").value = settings.testDurationMs;
+  document.getElementById("cfg_id_capture_past_ms").value = settings.idCapturePastMs;
+  document.getElementById("cfg_id_capture_future_ms").value = settings.idCaptureFutureMs;
+  document.getElementById("cfg_id_event_history_ms").value = settings.idEventHistoryMs;
+  document.getElementById("cfg_sleep_threshold_ua").value = settings.sleepThresholdUa;
+  document.getElementById("cfg_burst_threshold_ua").value = settings.burstThresholdUa;
+  document.getElementById("cfg_min_current_ua").value = settings.minCurrentUa;
+  document.getElementById("cfg_sleep_window_size").value = settings.sleepWindowSize;
+  document.getElementById("cfg_enable_rssi_filter").value = settings.enableRssiFilter ? 1 : 0;
+  document.getElementById("cfg_rssi_min_dbm").value = settings.rssiMinDbm;
+  document.getElementById("cfg_chart_max_points").value = settings.chartMaxPoints;
+  document.getElementById("cfg_chart_y_min_ua").value = settings.chartYMinUa;
+  document.getElementById("cfg_chart_y_max_ua").value = settings.chartYMaxUa;
+}
+
+function readConfigForm() {
+  return sanitizeSettings({
+    testDurationMs: document.getElementById("cfg_test_duration_ms").value,
+    idCapturePastMs: document.getElementById("cfg_id_capture_past_ms").value,
+    idCaptureFutureMs: document.getElementById("cfg_id_capture_future_ms").value,
+    idEventHistoryMs: document.getElementById("cfg_id_event_history_ms").value,
+    sleepThresholdUa: document.getElementById("cfg_sleep_threshold_ua").value,
+    burstThresholdUa: document.getElementById("cfg_burst_threshold_ua").value,
+    minCurrentUa: document.getElementById("cfg_min_current_ua").value,
+    sleepWindowSize: document.getElementById("cfg_sleep_window_size").value,
+    enableRssiFilter: document.getElementById("cfg_enable_rssi_filter").value,
+    rssiMinDbm: document.getElementById("cfg_rssi_min_dbm").value,
+    chartMaxPoints: document.getElementById("cfg_chart_max_points").value,
+    chartYMinUa: document.getElementById("cfg_chart_y_min_ua").value,
+    chartYMaxUa: document.getElementById("cfg_chart_y_max_ua").value
+  });
+}
+
+function applyChartSettings() {
+  chart.options.scales.y.min = settings.chartYMinUa;
+  chart.options.scales.y.max = settings.chartYMaxUa;
+  chart.update();
+}
+
+function openConfigModal() {
+  document.getElementById("configModal").style.display = "block";
+  document.getElementById("configPasswordSection").classList.remove("hidden");
+  document.getElementById("configFormSection").classList.add("hidden");
+  document.getElementById("configPasswordInput").value = "";
+  document.getElementById("configStatus").innerText = "Locked";
+  document.getElementById("configStatus2").innerText = "";
+  setTimeout(() => document.getElementById("configPasswordInput").focus(), 100);
+}
+
+function closeConfigModal() {
+  document.getElementById("configModal").style.display = "none";
+}
+
+function unlockConfig() {
+  const entered = document.getElementById("configPasswordInput").value;
+  if (entered !== CONFIG_PASSWORD) {
+    document.getElementById("configStatus").innerText = "Wrong password";
+    return;
+  }
+  populateConfigForm();
+  document.getElementById("configPasswordSection").classList.add("hidden");
+  document.getElementById("configFormSection").classList.remove("hidden");
+  document.getElementById("configStatus2").innerText = "Unlocked";
+}
 
 function clearSerialOnly() {
   document.getElementById("deviceSerial").value = '';
@@ -267,7 +472,7 @@ function parseIdLine(line) {
     raw: line.trim()
   };
 
-  if (ENABLE_RSSI_FILTER && parsed.rssi < RSSI_MIN_DBM) return null;
+  if (settings.enableRssiFilter && parsed.rssi < settings.rssiMinDbm) return null;
   return parsed;
 }
 
@@ -275,7 +480,7 @@ function rememberIdEvent(obj) {
   latestIdData = obj;
   recentIdEvents.push(obj);
 
-  const cutoff = Date.now() - ID_EVENT_HISTORY_MS;
+  const cutoff = Date.now() - settings.idEventHistoryMs;
   recentIdEvents = recentIdEvents.filter(e => e.timestamp >= cutoff);
 
   if (idCaptureWindowActive) idWindowEvents.push(obj);
@@ -300,13 +505,13 @@ function startIdCaptureWindow() {
   if (idCaptureWindowActive) return;
 
   const now = Date.now();
-  const pastCutoff = now - ID_CAPTURE_PAST_MS;
+  const pastCutoff = now - settings.idCapturePastMs;
 
   idCaptureWindowActive = true;
-  idCaptureWindowEnd = now + ID_CAPTURE_FUTURE_MS;
+  idCaptureWindowEnd = now + settings.idCaptureFutureMs;
   idWindowEvents = recentIdEvents.filter(e => e.timestamp >= pastCutoff);
 
-  setIdWindowStatus(`Capturing: -${ID_CAPTURE_PAST_MS}ms / +${ID_CAPTURE_FUTURE_MS}ms`);
+  setIdWindowStatus(`Capturing: -${settings.idCapturePastMs}ms / +${settings.idCaptureFutureMs}ms`);
 }
 
 function finishIdCaptureWindow() {
@@ -406,8 +611,8 @@ const chart = new Chart(ctx, {
     scales: {
       y: {
         type: 'logarithmic',
-        min: CHART_Y_MIN_UA,
-        max: CHART_Y_MAX_UA,
+        min: settings.chartYMinUa,
+        max: settings.chartYMaxUa,
         ticks: {
           callback: value => value + ' µA'
         }
@@ -415,6 +620,10 @@ const chart = new Chart(ctx, {
     }
   }
 });
+
+settings = sanitizeSettings(settings);
+saveSettings();
+updateConfigSummary();
 
 document.getElementById("loginBtn").onclick = async () => {
   const password = document.getElementById("password").value;
@@ -537,13 +746,13 @@ async function startTest() {
           const match = line.match(/Current:\s*([\d.]+)/i);
           if (!match) return;
 
-          const current = Math.max(parseFloat(match[1]) * 1000, MIN_CURRENT_UA);
+          const current = Math.max(parseFloat(match[1]) * 1000, settings.minCurrentUa);
 
           chart.data.labels.push('');
           chart.data.datasets[0].data.push(current);
-          chart.data.datasets[0].backgroundColor.push(current >= BURST_THRESHOLD_UA ? 'gold' : 'red');
+          chart.data.datasets[0].backgroundColor.push(current >= settings.burstThresholdUa ? 'gold' : 'red');
 
-          if (chart.data.labels.length > CHART_MAX_POINTS) {
+          if (chart.data.labels.length > settings.chartMaxPoints) {
             chart.data.labels.shift();
             chart.data.datasets[0].data.shift();
             chart.data.datasets[0].backgroundColor.shift();
@@ -553,16 +762,16 @@ async function startTest() {
 
           if (current > maxBurst) maxBurst = current;
 
-          if (current >= BURST_THRESHOLD_UA) {
+          if (current >= settings.burstThresholdUa) {
             burstCount++;
             if (!idCaptureWindowActive) startIdCaptureWindow();
           }
 
           document.getElementById("burstCount").innerText = burstCount;
 
-          if (current <= SLEEP_THRESHOLD_UA) {
+          if (current <= settings.sleepThresholdUa) {
             sleepWindow.push(current);
-            if (sleepWindow.length > SLEEP_WINDOW_SIZE) sleepWindow.shift();
+            if (sleepWindow.length > settings.sleepWindowSize) sleepWindow.shift();
 
             const sleepAvgLive = sleepWindow.reduce((a, b) => a + b, 0) / sleepWindow.length;
             document.getElementById("sleepAvg").innerText = Math.round(sleepAvgLive);
@@ -580,7 +789,7 @@ async function startTest() {
         finishIdCaptureWindow();
       }
 
-      if (Date.now() - start >= TEST_DURATION_MS) {
+      if (Date.now() - start >= settings.testDurationMs) {
         if (idCaptureWindowActive) finishIdCaptureWindow();
 
         const sleepAvg = sleepWindow.length ? sleepWindow.reduce((a, b) => a + b, 0) / sleepWindow.length : 0;
@@ -588,15 +797,15 @@ async function startTest() {
         const serial = document.getElementById("deviceSerial").value.trim();
 
         const overallCap = getOverallCap(burstCount);
-        const passSleep = sleepAvg < SLEEP_THRESHOLD_UA;
-        const passBurst = maxBurst > BURST_THRESHOLD_UA;
+        const passSleep = sleepAvg < settings.sleepThresholdUa;
+        const passBurst = maxBurst > settings.burstThresholdUa;
         const passOverall = overallAvg <= overallCap;
         const passId = !!serial && !!matchedIdThisTest;
 
         let reasons = [];
         if (!passId) reasons.push("No BLE ID detected in capture window");
-        if (!passSleep) reasons.push(`Sleep Avg > ${SLEEP_THRESHOLD_UA} µA`);
-        if (!passBurst) reasons.push(`Burst < ${BURST_THRESHOLD_UA} µA`);
+        if (!passSleep) reasons.push(`Sleep Avg > ${settings.sleepThresholdUa} µA`);
+        if (!passBurst) reasons.push(`Burst < ${settings.burstThresholdUa} µA`);
         if (!passOverall) reasons.push(`Overall Avg > ${overallCap} µA`);
 
         const finalResult = (passId && passSleep && passBurst && passOverall) ? "PASS" : "FAIL";
@@ -718,6 +927,27 @@ function addHistory(serial, barcodeLabel, sleepAvg, burstCount, peak, avg, resul
   `;
   document.getElementById("history").appendChild(tr);
 }
+
+document.getElementById("openConfigBtn").onclick = openConfigModal;
+document.getElementById("configUnlockBtn").onclick = unlockConfig;
+document.getElementById("configCloseBtn1").onclick = closeConfigModal;
+document.getElementById("configCloseBtn2").onclick = closeConfigModal;
+document.getElementById("configPasswordInput").onkeydown = (e) => { if (e.key === "Enter") unlockConfig(); };
+document.getElementById("configSaveBtn").onclick = () => {
+  settings = readConfigForm();
+  saveSettings();
+  updateConfigSummary();
+  applyChartSettings();
+  document.getElementById("configStatus2").innerText = "Settings saved on this PC";
+};
+document.getElementById("configResetBtn").onclick = () => {
+  settings = { ...DEFAULT_SETTINGS };
+  populateConfigForm();
+  saveSettings();
+  updateConfigSummary();
+  applyChartSettings();
+  document.getElementById("configStatus2").innerText = "Defaults restored and saved";
+};
 
 document.getElementById("connectPowerPortBtn").onclick = connectPowerPort;
 document.getElementById("connectIdPortBtn").onclick = connectIdPort;
