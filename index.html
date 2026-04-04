@@ -12,6 +12,7 @@ button { padding:10px; border:none; border-radius:6px; background:#3b82f6; color
 button.secondary { background:#475569; }
 button.success { background:#16a34a; }
 button.warn { background:#d97706; }
+button:disabled { opacity:0.5; cursor:not-allowed; }
 input { padding:6px; margin:5px; border-radius:6px; border:none; }
 .pass { color:lime; font-weight:bold; }
 .fail { color:red; font-weight:bold; }
@@ -52,7 +53,7 @@ label { display:inline-block; width:180px; }
 </head>
 <body>
 
-<h2>SEAL PROFILER DMAN@IOTI</h2>
+<h2>SEAL PROFILER        DMAN@IOTI</h2>
 
 <div class="card" id="loginCard">
   <input id="password" type="password" placeholder="ThingsBoard Password">
@@ -182,6 +183,7 @@ let lastBarcodeLabel = "";
 let idCaptureWindowActive = false;
 let idCaptureWindowEnd = 0;
 let idWindowEvents = [];
+let matchedIdThisTest = null;
 
 function clearSerialOnly() {
   document.getElementById("deviceSerial").value = '';
@@ -216,9 +218,26 @@ function getOverallCap(burstCount) {
   return 30;
 }
 
+function resetIdStateForNewTest() {
+  idBuffer = "";
+  latestIdData = { id: "", rssi: "", timestamp: 0, raw: "" };
+  recentIdEvents = [];
+  idCaptureWindowActive = false;
+  idCaptureWindowEnd = 0;
+  idWindowEvents = [];
+  matchedIdThisTest = null;
+
+  updateLastIdDisplay();
+  document.getElementById("peakMatchedId").innerText = "-";
+  setIdWindowStatus("Idle");
+}
+
 function resetUiForNewTest() {
   // IMPORTANT: clear serial at the start of every new test
   document.getElementById("deviceSerial").value = "";
+
+  // IMPORTANT: clear previous ID memory so we never reuse a prior unit's ID
+  resetIdStateForNewTest();
 
   chart.data.labels = [];
   chart.data.datasets[0].data = [];
@@ -231,14 +250,10 @@ function resetUiForNewTest() {
   document.getElementById("burstCount").innerText = 0;
   document.getElementById("testResult").innerText = "RUNNING";
   document.getElementById("manualButtons").style.display = "none";
-  document.getElementById("peakMatchedId").innerText = "-";
-  setIdWindowStatus("Idle");
+  document.getElementById("sendFailBtn").disabled = true;
   updateLastBarcodeLabel("");
 
   lastTestData = null;
-  idCaptureWindowActive = false;
-  idCaptureWindowEnd = 0;
-  idWindowEvents = [];
 }
 
 function parseIdLine(line) {
@@ -302,10 +317,14 @@ function finishIdCaptureWindow() {
 
   if (idWindowEvents.length > 0) {
     const picked = getBestIdEvent(idWindowEvents);
+    matchedIdThisTest = picked;
     document.getElementById("deviceSerial").value = picked.id;
     document.getElementById("peakMatchedId").innerText = picked.id;
     setIdWindowStatus(`Captured: ${picked.id} (RSSI ${picked.rssi})`);
   } else {
+    matchedIdThisTest = null;
+    document.getElementById("deviceSerial").value = "";
+    document.getElementById("peakMatchedId").innerText = "-";
     setIdWindowStatus("No ID seen around peak");
   }
 
@@ -566,30 +585,21 @@ async function startTest() {
 
         const sleepAvg = sleepWindow.length ? sleepWindow.reduce((a, b) => a + b, 0) / sleepWindow.length : 0;
         const overallAvg = totalCount ? totalSum / totalCount : 0;
-
-        let serial = document.getElementById("deviceSerial").value.trim();
-        if (!serial && latestIdData.id) {
-          serial = latestIdData.id;
-          document.getElementById("deviceSerial").value = serial;
-        }
-
-        if (!serial) {
-          alert("No serial ID detected from ID COM port and no manual serial entered.");
-          document.getElementById("testResult").innerText = "FAIL [No serial ID detected]";
-          break;
-        }
+        const serial = document.getElementById("deviceSerial").value.trim();
 
         const overallCap = getOverallCap(burstCount);
         const passSleep = sleepAvg < SLEEP_THRESHOLD_UA;
         const passBurst = maxBurst > BURST_THRESHOLD_UA;
         const passOverall = overallAvg <= overallCap;
+        const passId = !!serial && !!matchedIdThisTest;
 
         let reasons = [];
+        if (!passId) reasons.push("No BLE ID detected in capture window");
         if (!passSleep) reasons.push(`Sleep Avg > ${SLEEP_THRESHOLD_UA} µA`);
         if (!passBurst) reasons.push(`Burst < ${BURST_THRESHOLD_UA} µA`);
         if (!passOverall) reasons.push(`Overall Avg > ${overallCap} µA`);
 
-        const finalResult = (passSleep && passBurst && passOverall) ? "PASS" : "FAIL";
+        const finalResult = (passId && passSleep && passBurst && passOverall) ? "PASS" : "FAIL";
         document.getElementById("testResult").innerText =
           finalResult + (reasons.length ? " [" + reasons.join(", ") + "]" : "");
 
@@ -605,6 +615,7 @@ async function startTest() {
 
         if (finalResult === "FAIL") {
           document.getElementById("manualButtons").style.display = "block";
+          document.getElementById("sendFailBtn").disabled = !serial;
         } else {
           const barcodeLabel = await askForPcBarcode();
 
@@ -716,6 +727,12 @@ document.getElementById("retryBtn").onclick = () => { startTest(); };
 document.getElementById("sendFailBtn").onclick = async () => {
   if (lastTestData) {
     const d = lastTestData;
+
+    if (!d.serial) {
+      alert("Cannot send FAIL to ThingsBoard because no BLE ID / serial was captured for this test.");
+      return;
+    }
+
     try {
       await sendToThingsBoard(
         d.serial,
