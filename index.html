@@ -538,13 +538,14 @@ function startIdCaptureWindow() {
   if (idCaptureWindowActive) return;
 
   const now = Date.now();
-  const pastCutoff = now - settings.ID_CAPTURE_PAST_MS;
+  const idPastWindowMs = Math.max(settings.ID_CAPTURE_PAST_MS, settings.ID_EVENT_HISTORY_MS);
+  const pastCutoff = now - idPastWindowMs;
 
   idCaptureWindowActive = true;
   idCaptureWindowEnd = now + settings.ID_CAPTURE_FUTURE_MS;
   idWindowEvents = recentIdEvents.filter(e => e.timestamp >= pastCutoff);
 
-  setIdWindowStatus(`Capturing: -${settings.ID_CAPTURE_PAST_MS}ms / +${settings.ID_CAPTURE_FUTURE_MS}ms`);
+  setIdWindowStatus(`Capturing: -${idPastWindowMs}ms / +${settings.ID_CAPTURE_FUTURE_MS}ms`);
 }
 
 function finishIdCaptureWindow() {
