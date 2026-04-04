@@ -34,11 +34,13 @@ label { display:inline-block; width:240px; vertical-align:top; }
 }
 .modal-content {
   background: #1e293b;
-  margin: 5% auto;
-  padding: 20px;
+  margin: 3% auto;
+  padding: 16px;
   border-radius: 12px;
-  width: 94%;
-  max-width: 760px;
+  width: 92%;
+  max-width: 560px;
+  max-height: 80vh;
+  overflow-y: auto;
   box-shadow: 0 6px 20px rgba(0,0,0,0.5);
 }
 .modal-content input[type="text"],
@@ -46,16 +48,48 @@ label { display:inline-block; width:240px; vertical-align:top; }
 .modal-content input[type="number"] {
   width: calc(100% - 24px);
   font-size: 16px;
-  padding: 10px;
+  padding: 8px;
   margin-top: 8px;
   margin-bottom: 12px;
 }
 #barcodeStatus, #configStatus { margin-top: 10px; color: #94a3b8; }
-.cfg-grid { display:grid; grid-template-columns: 1fr 1fr; gap:12px 18px; }
+.cfg-grid {
+  display:grid;
+  grid-template-columns: 1fr;
+  gap:10px;
+}
 .cfg-item { background:#0f172a; padding:10px; border-radius:8px; }
 .cfg-item label { width:auto; display:block; margin-bottom:4px; color:#cbd5e1; }
 .cfg-item input[type="checkbox"] { transform:scale(1.2); margin-left:0; }
 .toolbar { display:flex; gap:8px; flex-wrap:wrap; }
+.statusRow {
+  display:flex;
+  gap:8px;
+  align-items:stretch;
+  flex-wrap:nowrap;
+}
+.metricsCard {
+  min-width:260px;
+  flex:0 0 260px;
+}
+.metricLine {
+  margin:8px 0;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:12px;
+  white-space:nowrap;
+}
+.metricLine strong {
+  color:#cbd5e1;
+  flex:0 0 110px;
+}
+.metricValue {
+  display:inline-block;
+  min-width:90px;
+  text-align:right;
+  font-variant-numeric: tabular-nums;
+}
 </style>
 </head>
 <body>
@@ -71,30 +105,43 @@ label { display:inline-block; width:240px; vertical-align:top; }
 
 <div id="pcApp">
   <div class="card" id="testCard">
-    Device Serial: <input id="deviceSerial"><br><br>
+    Device Serial: <input id="deviceSerial" oninput="this.value = this.value.toLowerCase()"><br><br>
 
     <button id="connectPowerPortBtn">Connect Power COM</button>
     <button id="connectIdPortBtn">Connect ID COM</button>
+    <button id="programBtn" class="warn">Program Device</button>
+    <input id="firmwareFileInput" type="file" accept=".hex,.bin,.txt" class="hidden">
     <button id="connect">Start Test</button>
+    <button id="stopEspBtn" class="secondary">Stop ESP Test</button>
     <button id="openConfigBtn2" class="secondary">Configuration</button>
 
-    <div class="statusBox">
-      <div>Power Port: <span id="powerPortStatus">Not connected</span></div>
-      <div>ID Port: <span id="idPortStatus">Not connected</span></div>
-      <div>Last ID Seen: <span id="lastSeenId">-</span></div>
-      <div>Last RSSI Seen: <span id="lastSeenRssi">-</span></div>
-      <div>Peak-Matched ID: <span id="peakMatchedId">-</span></div>
-      <div>ID Window: <span id="idWindowStatus">Idle</span></div>
-      <div>Overall Cap In Use: <span id="overallCapStatus">-</span></div>
-      <div>Last Barcode Label: <span id="lastBarcodeLabel">-</span></div>
+    <div class="statusRow">
+      <div class="statusBox" style="flex:1.2; min-width:280px;">
+        <div>Power Port: <span id="powerPortStatus">Not connected</span></div>
+        <div>ESP Programmer: <span id="programmerStatus">Idle</span></div>
+        <div>Program Detail: <span id="programmerDetail">-</span></div>
+        <div>ID Port: <span id="idPortStatus">Not connected</span></div>
+        <div>Last ID Seen: <span id="lastSeenId">-</span></div>
+        <div>Last RSSI Seen: <span id="lastSeenRssi">-</span></div>
+        <div>Peak-Matched ID: <span id="peakMatchedId">-</span></div>
+        <div>ID Window: <span id="idWindowStatus">Idle</span></div>
+        <div>Overall Cap In Use: <span id="overallCapStatus">-</span></div>
+        <div>Last Barcode Label: <span id="lastBarcodeLabel">-</span></div>
+      </div>
+
+      <div class="card metricsCard" style="flex:0.8;">
+        <div class="metricLine"><strong>Max Burst:</strong> <span><span id="maxValue" class="metricValue">0</span> µA</span></div>
+        <div class="metricLine"><strong>Sleep Avg:</strong> <span><span id="sleepAvg" class="metricValue">0</span> µA</span></div>
+        <div class="metricLine"><strong>Overall Avg:</strong> <span><span id="overallAvg" class="metricValue">0</span> µA</span></div>
+        <div class="metricLine"><strong>Burst Count:</strong> <span id="burstCount" class="metricValue">0</span></div>
+        <div class="metricLine"><strong>Result:</strong> <span id="testResult" class="metricValue">WAITING</span></div>
+      </div>
+
+      <div class="statusBox" style="flex:1.5; min-width:320px;">
+        <div>Programming Log</div>
+        <textarea id="programLog" readonly style="min-height:160px; resize:vertical; width:100%; background:#000; color:#fff; border:1px solid #334155; font-family:monospace;"></textarea>
+      </div>
     </div>
-
-    <p>Max Burst: <span id="maxValue">0</span> µA</p>
-    <p>Sleep Avg: <span id="sleepAvg">0</span> µA</p>
-    <p>Overall Avg: <span id="overallAvg">0</span> µA</p>
-    <p>Burst Count: <span id="burstCount">0</span></p>
-
-    <p>Result: <span id="testResult">WAITING</span></p>
 
     <div id="manualButtons" style="display:none;">
       <button id="retryBtn">Retry</button>
@@ -102,6 +149,7 @@ label { display:inline-block; width:240px; vertical-align:top; }
     </div>
 
     <p class="small">ID format expected on second COM port: RSSI:-60 ID:11479E73A94E6B58</p>
+    
     <canvas id="adcChart" height="30"></canvas>
   </div>
 
@@ -233,7 +281,7 @@ const CONFIG_PASSWORD = "12345";
 const SETTINGS_KEY = "blePowerTesterSettingsV2";
 
 // -------- Serial settings --------
-const POWER_PORT_BAUD = 115200;
+const POWER_PORT_BAUD = 460800;
 const ID_PORT_BAUD = 115200;
 
 const DEFAULT_SETTINGS = {
@@ -280,6 +328,426 @@ let idWindowEvents = [];
 let activeTestCapturedId = "";
 let activeTestHadPeak = false;
 let activeOverallCap = 0;
+let espLineBuffer = "";
+let testStopRequested = false;
+let programmingLogLines = [];
+
+function setProgrammerStatus(text) {
+  document.getElementById("programmerStatus").innerText = text;
+}
+
+function setProgrammerDetail(text) {
+  document.getElementById("programmerDetail").innerText = text || "-";
+}
+
+function clearProgrammingLog() {
+  programmingLogLines = [];
+  document.getElementById("programLog").value = "";
+  setProgrammerDetail("-");
+}
+
+function appendProgrammingLog(line) {
+  const clean = String(line || "").trim();
+  if (!clean) return;
+
+  // Suppress noisy non-actionable messages
+  if (clean === "Programming failed: Releasing Default reader" ||
+      clean.includes("Releasing Default reader") ||
+      clean === "Error: BreakError: Break received" ||
+      clean.includes("BreakError: Break received")) {
+    return;
+  }
+  programmingLogLines.push(clean);
+  if (programmingLogLines.length > 200) {
+    programmingLogLines = programmingLogLines.slice(-200);
+  }
+  const area = document.getElementById("programLog");
+  area.value = programmingLogLines.join("\n");
+  area.scrollTop = area.scrollHeight;
+  setProgrammerDetail(clean);
+}
+
+function safeReleaseReader(reader) {
+  if (!reader) return;
+  try { reader.releaseLock(); } catch (e) {}
+}
+
+async function sendCommandToPowerPort(cmd) {
+  if (!powerPort || !powerPort.writable) {
+    throw new Error("Power COM port is not connected.");
+  }
+  const writer = powerPort.writable.getWriter();
+  try {
+    await writer.write(new TextEncoder().encode(cmd + "\n"));
+  } finally {
+    writer.releaseLock();
+  }
+}
+
+async function waitForEspResponse(matchers, timeoutMs = 30000, onLine = null) {
+  if (!powerPort || !powerPort.readable) {
+    throw new Error("Power COM port is not connected.");
+  }
+
+  let localReader = null;
+  const start = Date.now();
+
+  try {
+    localReader = powerPort.readable.getReader();
+    powerReader = localReader;
+
+    while (Date.now() - start < timeoutMs) {
+      const { value, done } = await localReader.read();
+      if (done) break;
+      if (!value) continue;
+
+      espLineBuffer += new TextDecoder().decode(value);
+      const lines = espLineBuffer.split(/\r?\n/);
+      espLineBuffer = lines.pop();
+
+      for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line) continue;
+
+        if (onLine) onLine(line);
+
+        for (const matcher of matchers) {
+          if (matcher.when(line)) {
+            return { line, value: matcher.value ?? line };
+          }
+        }
+      }
+    }
+  } finally {
+    if (localReader) {
+      safeReleaseReader(localReader);
+      if (powerReader === localReader) {
+        powerReader = null;
+      }
+    }
+  }
+
+  throw new Error("Timed out waiting for ESP response.");
+}
+
+async function readSelectedFirmwareFile(file) {
+  const fileName = (file?.name || "").toLowerCase();
+  const fileText = await file.text();
+
+  if (fileName.endsWith(".hex") || fileText.trim().startsWith(":")) {
+    return parseIntelHexRecords(fileText);
+  }
+
+  const arrayBuffer = await file.arrayBuffer();
+  return {
+    type: "bin",
+    bytes: new Uint8Array(arrayBuffer)
+  };
+}
+
+function parseIntelHexRecords(hexText) {
+  const lines = String(hexText || "")
+    .split(/\r?\n/)
+    .map(x => x.trim())
+    .filter(Boolean);
+
+  if (!lines.length) throw new Error("Selected firmware file is empty.");
+
+  let eofSeen = false;
+  const records = [];
+  let dataRecordCount = 0;
+
+  for (const line of lines) {
+    if (!line.startsWith(":")) throw new Error("Invalid HEX file format.");
+
+    const record = line.slice(1);
+    if (record.length < 10 || (record.length % 2) !== 0) {
+      throw new Error("Invalid HEX record length.");
+    }
+
+    const raw = [];
+    for (let i = 0; i < record.length; i += 2) {
+      const value = parseInt(record.slice(i, i + 2), 16);
+      if (!Number.isFinite(value)) throw new Error("Invalid HEX data.");
+      raw.push(value);
+    }
+
+    const byteCount = raw[0];
+    const recordType = raw[3];
+    const checksum = raw[4 + byteCount];
+
+    if ((4 + byteCount) >= raw.length) {
+      throw new Error("Invalid HEX record length.");
+    }
+
+    let sum = 0;
+    for (let i = 0; i < 4 + byteCount; i++) sum = (sum + raw[i]) & 0xFF;
+    sum = ((~sum + 1) & 0xFF);
+    if (sum !== checksum) throw new Error("HEX checksum error.");
+
+    records.push(line.toUpperCase());
+    if (recordType === 0x00) dataRecordCount++;
+    if (recordType === 0x01) {
+      eofSeen = true;
+      break;
+    }
+  }
+
+  if (!eofSeen) throw new Error("HEX file missing EOF record.");
+  if (!records.length || dataRecordCount === 0) throw new Error("HEX file has no data records.");
+
+  return {
+    type: "hex",
+    records,
+    dataRecordCount
+  };
+}
+
+function bytesToHex(uint8) {
+  let out = "";
+  for (let i = 0; i < uint8.length; i++) {
+    out += uint8[i].toString(16).padStart(2, "0").toUpperCase();
+  }
+  return out;
+}
+
+function buildFastChunksFromIntelHex(records, chunkSize = 8192) {
+  let currentLinearBase = 0;
+  let currentSegmentBase = 0;
+  let linearBaseActive = false;
+
+  const blocks = [];
+  let blockStart = null;
+  let blockBytes = [];
+
+  function currentBase() {
+    return linearBaseActive ? currentLinearBase : currentSegmentBase;
+  }
+
+  function flushBlock() {
+    if (blockStart === null || blockBytes.length === 0) return;
+    blocks.push({
+      address: blockStart >>> 0,
+      bytes: new Uint8Array(blockBytes)
+    });
+    blockStart = null;
+    blockBytes = [];
+  }
+
+  function appendByte(address, value) {
+    if (blockStart === null) {
+      blockStart = address >>> 0;
+      blockBytes.push(value);
+      return;
+    }
+
+    const expectedNext = (blockStart + blockBytes.length) >>> 0;
+    const contiguous = address === expectedNext;
+    const fits = blockBytes.length < chunkSize;
+
+    if (!contiguous || !fits) {
+      flushBlock();
+      blockStart = address >>> 0;
+      blockBytes.push(value);
+      return;
+    }
+
+    blockBytes.push(value);
+  }
+
+  for (const line of records) {
+    const record = line.slice(1);
+    const byteCount = parseInt(record.slice(0, 2), 16);
+    const address = parseInt(record.slice(2, 6), 16);
+    const recordType = parseInt(record.slice(6, 8), 16);
+
+    if (recordType === 0x00) {
+      const absoluteBase = (currentBase() + address) >>> 0;
+      for (let i = 0; i < byteCount; i++) {
+        const value = parseInt(record.slice(8 + i * 2, 10 + i * 2), 16);
+        appendByte((absoluteBase + i) >>> 0, value);
+      }
+      continue;
+    }
+
+    flushBlock();
+
+    if (recordType === 0x01) {
+      break;
+    }
+
+    if (recordType === 0x02) {
+      const seg = parseInt(record.slice(8, 12), 16);
+      currentSegmentBase = (seg << 4) >>> 0;
+      linearBaseActive = false;
+      continue;
+    }
+
+    if (recordType === 0x04) {
+      const upper = parseInt(record.slice(8, 12), 16);
+      currentLinearBase = (upper << 16) >>> 0;
+      linearBaseActive = true;
+      continue;
+    }
+
+    // Ignore start address records (03 / 05) for chunk building.
+  }
+
+  flushBlock();
+  return blocks;
+}
+
+
+async function programFirmwareFromFile(file) {
+  if (!file) throw new Error("No firmware file selected.");
+
+  const firmware = await readSelectedFirmwareFile(file);
+
+  let chunks = [];
+  let sourceLabel = "";
+
+  if (firmware.type === "hex") {
+    chunks = buildFastChunksFromIntelHex(firmware.records, 8192);
+    if (!chunks.length) throw new Error("HEX conversion produced no chunks.");
+    sourceLabel = "HEX";
+    appendProgrammingLog(`HEX file loaded: ${file.name}`);
+    appendProgrammingLog(`HEX records: ${firmware.records.length}`);
+    appendProgrammingLog(`FAST chunks from HEX: ${chunks.length}`);
+  } else {
+    const firmwareBytes = firmware.bytes;
+    if (!firmwareBytes.length) throw new Error("Selected firmware file is empty.");
+
+    const chunkSize = 8192;
+    for (let offset = 0; offset < firmwareBytes.length; offset += chunkSize) {
+      chunks.push({
+        address: offset >>> 0,
+        bytes: firmwareBytes.slice(offset, Math.min(offset + chunkSize, firmwareBytes.length))
+      });
+    }
+
+    sourceLabel = "BIN";
+    appendProgrammingLog(`BIN file loaded: ${file.name}`);
+    appendProgrammingLog(`BIN bytes: ${firmwareBytes.length}`);
+    appendProgrammingLog(`FAST chunks: ${chunks.length}`);
+  }
+
+  setProgrammerStatus(`Preparing ${sourceLabel} ${file.name}...`);
+  document.getElementById("testResult").innerText = "PROGRAMMING";
+
+  await sendCommandToPowerPort(`FAST_BEGIN ${chunks.length} ${file.name}`);
+
+  const beginAck = await waitForEspResponse([
+    { when: line => /^FAST_READY$/i.test(line), value: "FAST_READY" },
+    { when: line => /^PROGRAM_FAIL/i.test(line), value: "PROGRAM_FAIL" },
+    { when: line => /^BUSY/i.test(line), value: "BUSY" }
+  ], 30000, appendProgrammingLog);
+
+  if (beginAck.value === "BUSY") {
+    setProgrammerStatus("Busy");
+    document.getElementById("testResult").innerText = "BUSY";
+    throw new Error("ESP is busy.");
+  }
+  if (beginAck.value !== "FAST_READY") {
+    setProgrammerStatus("Program FAIL");
+    document.getElementById("testResult").innerText = "FAIL [Programming failed]";
+    return false;
+  }
+
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    const addressHex = chunk.address.toString(16).toUpperCase().padStart(8, "0");
+    const hexPayload = bytesToHex(chunk.bytes);
+
+    setProgrammerStatus(`Programming chunk ${i + 1}/${chunks.length}...`);
+    await sendCommandToPowerPort(`FAST_CHUNK ${i + 1} ${addressHex} ${hexPayload}`);
+
+    const ack = await waitForEspResponse([
+      { when: line => /^BATCH_OK\b/i.test(line), value: "BATCH_OK" },
+      { when: line => /^PROGRAM_FAIL/i.test(line), value: "PROGRAM_FAIL" },
+      { when: line => /^VERIFY_FAIL/i.test(line), value: "VERIFY_FAIL" },
+      { when: line => /^BUSY/i.test(line), value: "BUSY" }
+    ], 120000, appendProgrammingLog);
+
+    if (ack.value !== "BATCH_OK") {
+      throw new Error(`ESP rejected chunk ${i + 1}/${chunks.length}.`);
+    }
+  }
+
+  setProgrammerStatus("Finalising programming...");
+  await sendCommandToPowerPort("FAST_END");
+
+  let sawVerifyOk = false;
+  while (true) {
+    const result = await waitForEspResponse([
+      { when: line => /^VERIFY_OK$/i.test(line), value: "VERIFY_OK" },
+      { when: line => /^PROGRAM_OK$/i.test(line), value: "PROGRAM_OK" },
+      { when: line => /^VERIFY_FAIL/i.test(line), value: "VERIFY_FAIL" },
+      { when: line => /^PROGRAM_FAIL/i.test(line), value: "PROGRAM_FAIL" },
+      { when: line => /^BUSY/i.test(line), value: "BUSY" }
+    ], 180000, appendProgrammingLog);
+
+    if (result.value === "VERIFY_OK") {
+      sawVerifyOk = true;
+      setProgrammerStatus("Verify OK, waiting for reset...");
+      continue;
+    }
+    if (result.value === "PROGRAM_OK") {
+      setProgrammerStatus("Program OK");
+      document.getElementById("testResult").innerText = sawVerifyOk ? "PROGRAM OK - PRESS TEST" : "PROGRAM OK";
+      return true;
+    }
+    if (result.value === "BUSY") {
+      setProgrammerStatus("Busy");
+      document.getElementById("testResult").innerText = "BUSY";
+      throw new Error("ESP is busy.");
+    }
+
+    setProgrammerStatus("Program FAIL");
+    document.getElementById("testResult").innerText = "FAIL [Programming failed]";
+    return false;
+  }
+}
+
+async function chooseFirmwareAndProgram() {
+  if (!powerPort) await connectPowerPort();
+  if (!powerPort || !powerPort.readable || !powerPort.writable) {
+    alert("Connect the Power COM port first.");
+    return false;
+  }
+
+  const input = document.getElementById("firmwareFileInput");
+  input.value = "";
+
+  const file = await new Promise((resolve) => {
+    input.onchange = () => resolve(input.files && input.files[0] ? input.files[0] : null);
+    input.click();
+  });
+
+  if (!file) {
+    setProgrammerStatus("Idle");
+    appendProgrammingLog("File selection cancelled.");
+    return false;
+  }
+
+  return programFirmwareFromFile(file);
+}
+
+async function runProgramSequence() {
+  return chooseFirmwareAndProgram();
+}
+
+async function stopEspTest() {
+  testStopRequested = true;
+  try {
+    if (powerPort && powerPort.writable) {
+      await sendCommandToPowerPort("STOP");
+    }
+  } catch (e) {
+    console.error(e);
+  }
+  setProgrammerStatus("Stopped");
+  appendProgrammingLog("TX: STOP");
+}
 
 function cloneDefaults() {
   return JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
@@ -478,6 +946,8 @@ function resetUiForNewTest() {
   document.getElementById("peakMatchedId").innerText = "-";
   setIdWindowStatus("Idle");
   setOverallCapStatus("-");
+  setProgrammerStatus("Idle");
+  setProgrammerDetail("-");
   updateLastBarcodeLabel("");
 
   lastTestData = null;
@@ -488,7 +958,6 @@ function resetUiForNewTest() {
   activeTestHadPeak = false;
   activeOverallCap = 0;
 
-  // Hard clear previous ID state so next unit cannot inherit it
   latestIdData = { id: "", rssi: "", timestamp: 0, raw: "" };
   recentIdEvents = [];
   updateLastIdDisplay();
@@ -556,10 +1025,10 @@ function finishIdCaptureWindow() {
 
   if (idWindowEvents.length > 0) {
     const picked = getBestIdEvent(idWindowEvents);
-    activeTestCapturedId = picked.id;
-    document.getElementById("deviceSerial").value = picked.id;
-    document.getElementById("peakMatchedId").innerText = picked.id;
-    setIdWindowStatus(`Captured: ${picked.id} (RSSI ${picked.rssi})`);
+    activeTestCapturedId = picked.id.toLowerCase();
+    document.getElementById("deviceSerial").value = picked.id.toLowerCase();
+    document.getElementById("peakMatchedId").innerText = picked.id.toLowerCase();
+    setIdWindowStatus(`Captured: ${picked.id.toLowerCase()} (RSSI ${picked.rssi})`);
   } else {
     activeTestCapturedId = "";
     document.getElementById("deviceSerial").value = "";
@@ -617,7 +1086,7 @@ async function startIdReadLoop() {
   } catch (e) {
     console.error("ID port read loop error:", e);
   } finally {
-    try { idReader.releaseLock(); } catch (e) {}
+    safeReleaseReader(idReader);
     idReader = null;
     idReadLoopRunning = false;
 
@@ -732,9 +1201,10 @@ async function startTest() {
   }
 
   resetUiForNewTest();
+  testStopRequested = false;
 
   if (!powerPort) await connectPowerPort();
-  if (!powerPort || !powerPort.readable) {
+  if (!powerPort || !powerPort.readable || !powerPort.writable) {
     alert("Connect the Power COM port first.");
     return;
   }
@@ -747,9 +1217,12 @@ async function startTest() {
   }
 
   if (powerReader) {
-    try { await powerReader.cancel(); } catch (e) {}
+    safeReleaseReader(powerReader);
     powerReader = null;
   }
+
+  setProgrammerStatus("Starting test...");
+  await sendCommandToPowerPort("TEST");
 
   powerReader = powerPort.readable.getReader();
 
@@ -775,7 +1248,22 @@ async function startTest() {
         buffer = lines.pop();
 
         lines.forEach(line => {
-          const match = line.match(/Current:\s*([\d.]+)/i);
+          const trimmed = line.trim();
+          if (!trimmed) return;
+
+          if (/^TEST_START$/i.test(trimmed)) {
+            setProgrammerStatus("Testing");
+            return;
+          }
+          if (/^TEST_STOP$/i.test(trimmed)) {
+            setProgrammerStatus("Stopped");
+            return;
+          }
+          if (/^PROGRAM_/i.test(trimmed) || /^PLEASE_PRESS_TEST$/i.test(trimmed) || /^PONG$/i.test(trimmed)) {
+            return;
+          }
+
+          const match = trimmed.match(/Current:\s*([\d.]+)/i);
           if (!match) return;
 
           const current = Math.max(parseFloat(match[1]) * 1000, settings.MIN_CURRENT_UA);
@@ -824,6 +1312,11 @@ async function startTest() {
         finishIdCaptureWindow();
       }
 
+      if (testStopRequested) {
+        document.getElementById("testResult").innerText = "STOPPED";
+        break;
+      }
+
       if (Date.now() - start >= settings.TEST_DURATION_MS) {
         if (idCaptureWindowActive) finishIdCaptureWindow();
 
@@ -832,7 +1325,7 @@ async function startTest() {
         const overallCap = getOverallCap(burstCount);
         setOverallCapStatus(overallCap);
 
-        let serial = document.getElementById("deviceSerial").value.trim();
+        let serial = document.getElementById("deviceSerial").value.trim().toLowerCase();
 
         const passSleep = sleepAvg < settings.SLEEP_THRESHOLD_UA;
         const passBurst = maxBurst > settings.BURST_THRESHOLD_UA;
@@ -897,17 +1390,24 @@ async function startTest() {
       }
     }
 
-    try { powerReader.releaseLock(); } catch (e) {}
-    powerReader = null;
+    try { await sendCommandToPowerPort("STOP"); } catch (e) { console.error(e); }
+    if (powerReader) {
+      safeReleaseReader(powerReader);
+      powerReader = null;
+    }
+    setProgrammerStatus("Stopped");
   } catch (e) {
     console.error(e);
     alert("Error: " + e);
-    try { powerReader.releaseLock(); } catch (x) {}
-    powerReader = null;
+    if (powerReader) {
+      safeReleaseReader(powerReader);
+      powerReader = null;
+    }
   }
 }
 
 async function sendToThingsBoard(serial, barcodeLabel, sleepAvg, burstCount, peak, avg, result, reason) {
+  serial = (serial || "").trim().toLowerCase();
   const deviceBody = { name: serial, type: "BLE Device" };
   if (barcodeLabel) deviceBody.label = barcodeLabel;
 
@@ -1030,7 +1530,20 @@ document.getElementById("configSaveBtn").onclick = () => {
 // ---------- Buttons ----------
 document.getElementById("connectPowerPortBtn").onclick = connectPowerPort;
 document.getElementById("connectIdPortBtn").onclick = connectIdPort;
+document.getElementById("programBtn").onclick = async () => {
+  try {
+    await runProgramSequence();
+  } catch (e) {
+    console.error(e);
+    const msg = String(e && e.message ? e.message : e || "");
+    if (!msg.includes("Releasing Default reader") &&
+        !msg.includes("BreakError: Break received")) {
+      alert("Programming failed: " + msg);
+    }
+  }
+};
 document.getElementById("connect").onclick = startTest;
+document.getElementById("stopEspBtn").onclick = stopEspTest;
 document.getElementById("retryBtn").onclick = () => { startTest(); };
 
 document.getElementById("sendFailBtn").onclick = async () => {
@@ -1063,6 +1576,9 @@ document.getElementById("sendFailBtn").onclick = async () => {
 
 // Initial apply
 applySettingsToUi();
+setProgrammerStatus("Idle");
+setProgrammerDetail("-");
+clearProgrammingLog();
 setInterval(() => cleanupExpiredIdEvents(true), 250);
 </script>
 </body>
