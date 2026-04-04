@@ -3,7 +3,28 @@
 <head>
 <meta charset="UTF-8">
 <title>BLE Automated Power Test + ThingsBoard</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js">
+// AUTO START VOICE ON LOAD
+window.addEventListener("load", async () => {
+  try {
+    await navigator.mediaDevices.getUserMedia({ audio: true });
+    setTimeout(() => {
+      try {
+        startVoiceCommands();
+      } catch (e) {
+        console.error("Auto voice start failed:", e);
+      }
+    }, 1000);
+  } catch (e) {
+    console.error("Mic permission required:", e);
+  }
+});
+
+
+document.getElementById("voiceCmdBtn").onclick = startVoiceCommands;
+document.getElementById("voiceCmdStopBtn").onclick = stopVoiceCommands;
+</script>
+
 <style>
 body { background:#0f172a; color:#e2e8f0; font-family:Arial; padding:20px; }
 .card { background:#1e293b; padding:15px; border-radius:10px; margin-bottom:10px; }
@@ -168,6 +189,10 @@ label { display:inline-block; width:240px; vertical-align:top; }
     <input id="firmwareFileInput" type="file" accept=".hex,.bin,.txt" class="hidden">
     <button id="connect">Start Test</button>
     <button id="stopEspBtn" class="secondary">Stop Test</button>
+
+<button id="voiceCmdBtn" class="success">Start Voice</button>
+<button id="voiceCmdStopBtn" class="secondary">Stop Voice</button>
+
     <button id="openConfigBtn2" class="secondary">Configuration</button>
 
     <div id="voiceStatus" class="voiceStatus">Voice commands: Idle</div>
@@ -2373,6 +2398,10 @@ setInterval(() => cleanupExpiredIdEvents(true), 250);
 // Voice is only started from the Start Voice button to avoid browser mic permission pop-up loops.
 // While spoken feedback plays, the mic session stays alive and only command handling is disabled in software.
 
+
+document.getElementById("voiceCmdBtn").onclick = startVoiceCommands;
+document.getElementById("voiceCmdStopBtn").onclick = stopVoiceCommands;
 </script>
+
 </body>
 </html>
