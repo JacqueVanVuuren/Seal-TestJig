@@ -170,9 +170,6 @@ label { display:inline-block; width:240px; vertical-align:top; }
     <button id="stopEspBtn" class="secondary">Stop Test</button>
     <button id="openConfigBtn2" class="secondary">Configuration</button>
 
-    <button id="voiceCmdBtn" class="success">Start Voice</button>
-    <button id="voiceCmdStopBtn" class="secondary">Stop Voice</button>
-
     <div id="voiceStatus" class="voiceStatus">Voice commands: Idle</div>
 
     <div class="statusRow">
@@ -209,7 +206,7 @@ label { display:inline-block; width:240px; vertical-align:top; }
     </div>
 
     <p class="small">ID format expected on second COM port: RSSI:-60 ID:11479E73A94E6B58</p>
-    
+
     <canvas id="adcChart" height="30"></canvas>
   </div>
 
@@ -406,7 +403,7 @@ const DEFAULT_SETTINGS = {
   ELEVENLABS_VOICE_ID: "JBFqnCBsd6RMkjVDRZzb",
   ELEVENLABS_MODEL_ID: "eleven_flash_v2_5",
   DEEPGRAM_VOICE_ENABLED: false,
-  DEEPGRAM_API_KEY: "",
+  DEEPGRAM_API_KEY: "0ad97c65bf74d1fa8e34fb89d9e14efe0d2656ee",
   DEEPGRAM_MODEL: "nova-3",
   DEEPGRAM_LANGUAGE: "en-US",
   DEEPGRAM_ENDPOINTING_MS: 300,
@@ -705,7 +702,6 @@ function speakTestResult(result, reasonsText) {
   }
 }
 
-
 function safeReleaseReader(reader) {
   if (!reader) return;
   try { reader.releaseLock(); } catch (e) {}
@@ -935,7 +931,6 @@ function buildFastChunksFromIntelHex(records, chunkSize = 8192) {
   flushBlock();
   return blocks;
 }
-
 
 async function programFirmwareFromFile(file) {
   if (!file) throw new Error("No firmware file selected.");
@@ -1466,7 +1461,6 @@ async function startIdReadLoop() {
     else setIdPortStatus("Disconnected");
   }
 }
-
 
 function saveVoiceEnabledPreference(enabled) {
   try {
@@ -2337,6 +2331,7 @@ document.getElementById("loadFirmwareBtn").onclick = async () => {
 document.getElementById("connect").onclick = startTest;
 document.getElementById("stopEspBtn").onclick = stopEspTest;
 document.getElementById("voiceCmdBtn").onclick = startVoiceCommands;
+window.addEventListener("load", () => { startVoiceCommands(); });
 document.getElementById("voiceCmdStopBtn").onclick = stopVoiceCommands;
 document.getElementById("retryBtn").onclick = () => { startTest(); };
 
