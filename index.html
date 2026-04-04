@@ -61,7 +61,18 @@ label { display:inline-block; width:240px; vertical-align:top; }
 .cfg-item { background:#0f172a; padding:10px; border-radius:8px; }
 .cfg-item label { width:auto; display:block; margin-bottom:4px; color:#cbd5e1; }
 .cfg-item input[type="checkbox"] { transform:scale(1.2); margin-left:0; }
-.toolbar { display:flex; gap:8px; flex-wrap:wrap; }
+.toolbar { display:flex; gap:8px; flex-wrap:nowrap; overflow-x:auto; }
+.voiceToolbar {
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  margin:10px 0 0 0;
+}
+.voiceStatus {
+  margin-top:8px;
+  color:#94a3b8;
+  font-size:12px;
+}
 .statusRow {
   display:flex;
   gap:8px;
@@ -69,6 +80,9 @@ label { display:inline-block; width:240px; vertical-align:top; }
   flex-wrap:nowrap;
 }
 .metricsCard {
+  flex:1;
+  min-width:220px;
+
   min-width:260px;
   flex:0 0 260px;
 }
@@ -90,6 +104,46 @@ label { display:inline-block; width:240px; vertical-align:top; }
   text-align:right;
   font-variant-numeric: tabular-nums;
 }
+
+.resultText {
+  display: block;
+  max-width: 100%;
+
+  display: inline-block;
+  max-width: 220px;
+  white-space: normal;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  line-height: 1.4;
+}
+
+.resultText {
+  display: block !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+  word-break: break-word !important;
+  line-height: 1.35 !important;
+  text-align: left !important;
+}
+.metricLine.resultLine {
+  display: block !important;
+  white-space: normal !important;
+}
+.metricLine.resultLine strong {
+  display: block !important;
+  margin-bottom: 4px;
+}
+.metricLine.resultLine .resultText {
+  margin-top: 2px;
+}
+.metricsCard {
+  min-width: 260px !important;
+  max-width: 260px !important;
+  overflow: hidden !important;
+}
+
 </style>
 </head>
 <body>
@@ -109,11 +163,17 @@ label { display:inline-block; width:240px; vertical-align:top; }
 
     <button id="connectPowerPortBtn">Connect Power COM</button>
     <button id="connectIdPortBtn">Connect ID COM</button>
+    <button id="loadFirmwareBtn" class="secondary">Select Firmware</button>
     <button id="programBtn" class="warn">Program Device</button>
     <input id="firmwareFileInput" type="file" accept=".hex,.bin,.txt" class="hidden">
     <button id="connect">Start Test</button>
-    <button id="stopEspBtn" class="secondary">Stop ESP Test</button>
+    <button id="stopEspBtn" class="secondary">Stop Test</button>
     <button id="openConfigBtn2" class="secondary">Configuration</button>
+
+    <button id="voiceCmdBtn" class="success">Start Voice</button>
+    <button id="voiceCmdStopBtn" class="secondary">Stop Voice</button>
+
+    <div id="voiceStatus" class="voiceStatus">Voice commands: Idle</div>
 
     <div class="statusRow">
       <div class="statusBox" style="flex:1.2; min-width:280px;">
@@ -134,7 +194,7 @@ label { display:inline-block; width:240px; vertical-align:top; }
         <div class="metricLine"><strong>Sleep Avg:</strong> <span><span id="sleepAvg" class="metricValue">0</span> µA</span></div>
         <div class="metricLine"><strong>Overall Avg:</strong> <span><span id="overallAvg" class="metricValue">0</span> µA</span></div>
         <div class="metricLine"><strong>Burst Count:</strong> <span id="burstCount" class="metricValue">0</span></div>
-        <div class="metricLine"><strong>Result:</strong> <span id="testResult" class="metricValue">WAITING</span></div>
+        <div class="metricLine resultLine"><strong>Result:</strong><span id="testResult" class="resultText">WAITING</span></div>
       </div>
 
       <div class="statusBox" style="flex:1.5; min-width:320px;">
@@ -251,6 +311,48 @@ label { display:inline-block; width:240px; vertical-align:top; }
         <input id="cfgChartYMaxUa" type="number" min="1" step="1">
       </div>
       <div class="cfg-item">
+        <label for="cfgAiVoiceEnabled">Enable AI Voice (ElevenLabs)</label>
+        <input id="cfgAiVoiceEnabled" type="checkbox">
+      </div>
+      <div class="cfg-item">
+        <label for="cfgElevenLabsApiKey">ElevenLabs API Key</label>
+        <input id="cfgElevenLabsApiKey" type="password" placeholder="xi-...">
+      </div>
+      <div class="cfg-item">
+        <label for="cfgElevenLabsVoiceId">ElevenLabs Voice ID</label>
+        <input id="cfgElevenLabsVoiceId" type="text" placeholder="JBFqnCBsd6RMkjVDRZzb">
+      </div>
+      <div class="cfg-item">
+        <label for="cfgElevenLabsModelId">ElevenLabs Model ID</label>
+        <input id="cfgElevenLabsModelId" type="text" placeholder="eleven_flash_v2_5">
+      </div>
+      <div class="cfg-item">
+        <div class="small">AI voice uses the ElevenLabs Text-to-Speech API. Your API key is stored in this browser's local storage in this HTML app.</div>
+      </div>
+      <div class="cfg-item">
+        <label for="cfgDeepgramVoiceEnabled">Enable Deepgram Voice Commands</label>
+        <input id="cfgDeepgramVoiceEnabled" type="checkbox">
+      </div>
+      <div class="cfg-item">
+        <label for="cfgDeepgramApiKey">Deepgram API Key / Temporary Token</label>
+        <input id="cfgDeepgramApiKey" type="password" placeholder="Deepgram key or short-lived token">
+      </div>
+      <div class="cfg-item">
+        <label for="cfgDeepgramModel">Deepgram Model</label>
+        <input id="cfgDeepgramModel" type="text" placeholder="nova-3">
+      </div>
+      <div class="cfg-item">
+        <label for="cfgDeepgramLanguage">Deepgram Language</label>
+        <input id="cfgDeepgramLanguage" type="text" placeholder="en-US">
+      </div>
+      <div class="cfg-item">
+        <label for="cfgDeepgramEndpointingMs">Deepgram Endpointing (ms)</label>
+        <input id="cfgDeepgramEndpointingMs" type="number" min="0" step="1">
+      </div>
+      <div class="cfg-item">
+        <div class="small">For quick testing you can paste a Deepgram key directly here. For production, use a short-lived token from your backend instead of storing a long-lived key in the browser.</div>
+      </div>
+      <div class="cfg-item">
         <label for="cfgOverallCapRules">Overall Cap Rules by Burst Count</label>
         <textarea id="cfgOverallCapRules" placeholder="Example:
 45=150
@@ -278,7 +380,8 @@ label { display:inline-block; width:240px; vertical-align:top; }
 const SERVER = "https://thingsboard.intarget.mobi";
 const USERNAME = "dman@ioti.mobi";
 const CONFIG_PASSWORD = "12345";
-const SETTINGS_KEY = "blePowerTesterSettingsV2";
+const SETTINGS_KEY = "blePowerTesterSettingsV3";
+const VOICE_ENABLED_KEY = "blePowerTesterVoiceEnabled";
 
 // -------- Serial settings --------
 const POWER_PORT_BAUD = 460800;
@@ -298,6 +401,15 @@ const DEFAULT_SETTINGS = {
   CHART_Y_MIN_UA: 1,
   CHART_Y_MAX_UA: 25000,
   SLEEP_WINDOW_SIZE: 20,
+  AI_VOICE_ENABLED: false,
+  ELEVENLABS_API_KEY: "",
+  ELEVENLABS_VOICE_ID: "JBFqnCBsd6RMkjVDRZzb",
+  ELEVENLABS_MODEL_ID: "eleven_flash_v2_5",
+  DEEPGRAM_VOICE_ENABLED: false,
+  DEEPGRAM_API_KEY: "",
+  DEEPGRAM_MODEL: "nova-3",
+  DEEPGRAM_LANGUAGE: "en-US",
+  DEEPGRAM_ENDPOINTING_MS: 300,
   OVERALL_CAP_RULES: [
     { burstMin: 45, cap: 150 },
     { burstMin: 40, cap: 140 },
@@ -331,6 +443,30 @@ let activeOverallCap = 0;
 let espLineBuffer = "";
 let testStopRequested = false;
 let programmingLogLines = [];
+let selectedFirmwareFile = null;
+let selectedFirmwareName = "";
+let voiceRecognition = null;
+let voiceRecognitionRunning = false;
+let voiceRecognitionSupported = false;
+let voiceRecognitionShouldStayOn = false;
+let voiceRecognitionRestartTimer = null;
+let voiceRecognitionBlockedByPermission = false;
+let voiceRecognitionLastStartAt = 0;
+let voiceRecognitionRearmCount = 0;
+let voiceCommandProcessingEnabled = true;
+let voiceOutputActive = false;
+let voiceOutputResumeTimer = null;
+let deepgramSocket = null;
+let deepgramMediaStream = null;
+let deepgramMediaRecorder = null;
+let deepgramKeepAliveTimer = null;
+let deepgramReconnectTimer = null;
+let deepgramReconnectAttempts = 0;
+let deepgramConnectInProgress = false;
+let deepgramSessionShouldStayOn = false;
+let deepgramSessionRunning = false;
+let deepgramTranscriptBuffer = "";
+let deepgramLastHeardAt = 0;
 
 function setProgrammerStatus(text) {
   document.getElementById("programmerStatus").innerText = text;
@@ -344,6 +480,30 @@ function clearProgrammingLog() {
   programmingLogLines = [];
   document.getElementById("programLog").value = "";
   setProgrammerDetail("-");
+}
+
+function updateFirmwareLoadedStatus() {
+  if (selectedFirmwareName) {
+    appendProgrammingLog("Firmware ready: " + selectedFirmwareName);
+    setProgrammerDetail("Firmware ready: " + selectedFirmwareName);
+  }
+}
+
+async function chooseFirmwareFileOnly() {
+  const input = document.getElementById("firmwareFileInput");
+  input.value = "";
+
+  const file = await new Promise((resolve) => {
+    input.onchange = () => resolve(input.files && input.files[0] ? input.files[0] : null);
+    input.click();
+  });
+
+  if (!file) return null;
+
+  selectedFirmwareFile = file;
+  selectedFirmwareName = file.name || "";
+  updateFirmwareLoadedStatus();
+  return file;
 }
 
 function appendProgrammingLog(line) {
@@ -366,6 +526,185 @@ function appendProgrammingLog(line) {
   area.scrollTop = area.scrollHeight;
   setProgrammerDetail(clean);
 }
+
+let aiVoiceAudio = null;
+
+function disableVoiceCommandProcessing() {
+  voiceOutputActive = true;
+  voiceCommandProcessingEnabled = false;
+
+  if (voiceOutputResumeTimer) {
+    clearTimeout(voiceOutputResumeTimer);
+    voiceOutputResumeTimer = null;
+  }
+
+  setVoiceStatus("Speaking...");
+}
+
+function enableVoiceCommandProcessingAfterDelay(delayMs = 3000) {
+  if (voiceOutputResumeTimer) {
+    clearTimeout(voiceOutputResumeTimer);
+  }
+
+  voiceOutputResumeTimer = setTimeout(() => {
+    voiceOutputResumeTimer = null;
+    voiceOutputActive = false;
+
+    if (deepgramSessionShouldStayOn && deepgramSessionRunning) {
+      voiceCommandProcessingEnabled = true;
+      setVoiceStatus("Listening");
+    } else if (deepgramSessionShouldStayOn) {
+      voiceCommandProcessingEnabled = false;
+      setVoiceStatus("Reconnecting...");
+    } else {
+      voiceCommandProcessingEnabled = false;
+      setVoiceStatus("Stopped");
+    }
+  }, delayMs);
+}
+
+async function speakText(text) {
+  const msg = String(text || "").trim();
+  if (!msg) return;
+
+  disableVoiceCommandProcessing();
+
+  try {
+    if (settings.AI_VOICE_ENABLED && settings.ELEVENLABS_API_KEY && settings.ELEVENLABS_VOICE_ID) {
+      try {
+        await speakWithElevenLabs(msg);
+      } catch (e) {
+        console.error("ElevenLabs voice failed, falling back to browser voice:", e);
+        await speakWithBrowserVoice(msg);
+      }
+    } else {
+      await speakWithBrowserVoice(msg);
+    }
+  } finally {
+    enableVoiceCommandProcessingAfterDelay(3000);
+  }
+}
+
+function speakWithBrowserVoice(text) {
+  return new Promise((resolve) => {
+    try {
+      if (!("speechSynthesis" in window)) {
+        resolve();
+        return;
+      }
+
+      const msg = String(text || "").trim();
+      if (!msg) {
+        resolve();
+        return;
+      }
+
+      window.speechSynthesis.cancel();
+
+      const utterance = new SpeechSynthesisUtterance(msg);
+      utterance.rate = 1.0;
+      utterance.pitch = 1.0;
+      utterance.volume = 1.0;
+      utterance.onend = () => resolve();
+      utterance.onerror = () => resolve();
+      window.speechSynthesis.speak(utterance);
+    } catch (e) {
+      console.error("Speech error:", e);
+      resolve();
+    }
+  });
+}
+
+async function speakWithElevenLabs(text) {
+  const apiKey = String(settings.ELEVENLABS_API_KEY || "").trim();
+  const voiceId = String(settings.ELEVENLABS_VOICE_ID || "").trim();
+  const modelId = String(settings.ELEVENLABS_MODEL_ID || "eleven_flash_v2_5").trim();
+
+  if (!apiKey || !voiceId) throw new Error("Missing ElevenLabs API key or voice ID.");
+
+  const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "xi-api-key": apiKey
+    },
+    body: JSON.stringify({
+      text,
+      model_id: modelId
+    })
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`ElevenLabs TTS failed (${res.status}): ${errText || res.statusText}`);
+  }
+
+  const blob = await res.blob();
+  const audioUrl = URL.createObjectURL(blob);
+
+  if (aiVoiceAudio) {
+    try {
+      aiVoiceAudio.pause();
+      if (aiVoiceAudio.dataset && aiVoiceAudio.dataset.url) {
+        URL.revokeObjectURL(aiVoiceAudio.dataset.url);
+      }
+    } catch (e) {}
+  }
+
+  aiVoiceAudio = new Audio(audioUrl);
+  aiVoiceAudio.dataset.url = audioUrl;
+
+  await new Promise((resolve, reject) => {
+    let settled = false;
+
+    const cleanup = () => {
+      aiVoiceAudio.onended = null;
+      aiVoiceAudio.onerror = null;
+    };
+
+    aiVoiceAudio.onended = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve();
+    };
+
+    aiVoiceAudio.onerror = (e) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(e || new Error("ElevenLabs audio playback failed."));
+    };
+
+    aiVoiceAudio.play().catch((err) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(err);
+    });
+  });
+}
+
+function speakTestResult(result, reasonsText) {
+  const r = String(result || "").toUpperCase();
+  const reasons = String(reasonsText || "").trim();
+
+  if (r === "PASS") {
+    speakText("Pass");
+    return;
+  }
+
+  if (r === "FAIL") {
+    if (reasons) {
+      speakText("Fail. " + reasons.replace(/;/g, ". "));
+    } else {
+      speakText("Fail");
+    }
+  }
+}
+
 
 function safeReleaseReader(reader) {
   if (!reader) return;
@@ -715,17 +1054,15 @@ async function chooseFirmwareAndProgram() {
     return false;
   }
 
-  const input = document.getElementById("firmwareFileInput");
-  input.value = "";
+  let file = selectedFirmwareFile;
 
-  const file = await new Promise((resolve) => {
-    input.onchange = () => resolve(input.files && input.files[0] ? input.files[0] : null);
-    input.click();
-  });
+  if (!file) {
+    file = await chooseFirmwareFileOnly();
+  }
 
   if (!file) {
     setProgrammerStatus("Idle");
-    appendProgrammingLog("File selection cancelled.");
+    appendProgrammingLog("No firmware selected.");
     return false;
   }
 
@@ -770,6 +1107,23 @@ function sanitizeSettings(obj) {
   s.CHART_Y_MIN_UA = toNum(obj.CHART_Y_MIN_UA, s.CHART_Y_MIN_UA, 0.001);
   s.CHART_Y_MAX_UA = toNum(obj.CHART_Y_MAX_UA, s.CHART_Y_MAX_UA, 1);
   s.SLEEP_WINDOW_SIZE = toNum(obj.SLEEP_WINDOW_SIZE, s.SLEEP_WINDOW_SIZE, 1);
+  s.AI_VOICE_ENABLED = !!obj.AI_VOICE_ENABLED;
+  s.ELEVENLABS_API_KEY = typeof obj.ELEVENLABS_API_KEY === "string" ? obj.ELEVENLABS_API_KEY : "";
+  s.ELEVENLABS_VOICE_ID = typeof obj.ELEVENLABS_VOICE_ID === "string" && obj.ELEVENLABS_VOICE_ID.trim()
+    ? obj.ELEVENLABS_VOICE_ID.trim()
+    : s.ELEVENLABS_VOICE_ID;
+  s.ELEVENLABS_MODEL_ID = typeof obj.ELEVENLABS_MODEL_ID === "string" && obj.ELEVENLABS_MODEL_ID.trim()
+    ? obj.ELEVENLABS_MODEL_ID.trim()
+    : s.ELEVENLABS_MODEL_ID;
+  s.DEEPGRAM_VOICE_ENABLED = !!obj.DEEPGRAM_VOICE_ENABLED;
+  s.DEEPGRAM_API_KEY = typeof obj.DEEPGRAM_API_KEY === "string" ? obj.DEEPGRAM_API_KEY : "";
+  s.DEEPGRAM_MODEL = typeof obj.DEEPGRAM_MODEL === "string" && obj.DEEPGRAM_MODEL.trim()
+    ? obj.DEEPGRAM_MODEL.trim()
+    : s.DEEPGRAM_MODEL;
+  s.DEEPGRAM_LANGUAGE = typeof obj.DEEPGRAM_LANGUAGE === "string" && obj.DEEPGRAM_LANGUAGE.trim()
+    ? obj.DEEPGRAM_LANGUAGE.trim()
+    : s.DEEPGRAM_LANGUAGE;
+  s.DEEPGRAM_ENDPOINTING_MS = toNum(obj.DEEPGRAM_ENDPOINTING_MS, s.DEEPGRAM_ENDPOINTING_MS, 0);
 
   if (Array.isArray(obj.OVERALL_CAP_RULES)) {
     const parsed = obj.OVERALL_CAP_RULES
@@ -844,6 +1198,15 @@ function applySettingsToUi() {
   document.getElementById("cfgChartMaxPoints").value = settings.CHART_MAX_POINTS;
   document.getElementById("cfgChartYMinUa").value = settings.CHART_Y_MIN_UA;
   document.getElementById("cfgChartYMaxUa").value = settings.CHART_Y_MAX_UA;
+  document.getElementById("cfgAiVoiceEnabled").checked = settings.AI_VOICE_ENABLED;
+  document.getElementById("cfgElevenLabsApiKey").value = settings.ELEVENLABS_API_KEY;
+  document.getElementById("cfgElevenLabsVoiceId").value = settings.ELEVENLABS_VOICE_ID;
+  document.getElementById("cfgElevenLabsModelId").value = settings.ELEVENLABS_MODEL_ID;
+  document.getElementById("cfgDeepgramVoiceEnabled").checked = settings.DEEPGRAM_VOICE_ENABLED;
+  document.getElementById("cfgDeepgramApiKey").value = settings.DEEPGRAM_API_KEY;
+  document.getElementById("cfgDeepgramModel").value = settings.DEEPGRAM_MODEL;
+  document.getElementById("cfgDeepgramLanguage").value = settings.DEEPGRAM_LANGUAGE;
+  document.getElementById("cfgDeepgramEndpointingMs").value = settings.DEEPGRAM_ENDPOINTING_MS;
   document.getElementById("cfgOverallCapRules").value = rulesToText(settings.OVERALL_CAP_RULES);
 
   applyChartSettings();
@@ -865,6 +1228,15 @@ function readSettingsFromUi() {
     CHART_Y_MIN_UA: Number(document.getElementById("cfgChartYMinUa").value),
     CHART_Y_MAX_UA: Number(document.getElementById("cfgChartYMaxUa").value),
     SLEEP_WINDOW_SIZE: Number(document.getElementById("cfgSleepWindowSize").value),
+    AI_VOICE_ENABLED: document.getElementById("cfgAiVoiceEnabled").checked,
+    ELEVENLABS_API_KEY: document.getElementById("cfgElevenLabsApiKey").value.trim(),
+    ELEVENLABS_VOICE_ID: document.getElementById("cfgElevenLabsVoiceId").value.trim(),
+    ELEVENLABS_MODEL_ID: document.getElementById("cfgElevenLabsModelId").value.trim(),
+    DEEPGRAM_VOICE_ENABLED: document.getElementById("cfgDeepgramVoiceEnabled").checked,
+    DEEPGRAM_API_KEY: document.getElementById("cfgDeepgramApiKey").value.trim(),
+    DEEPGRAM_MODEL: document.getElementById("cfgDeepgramModel").value.trim(),
+    DEEPGRAM_LANGUAGE: document.getElementById("cfgDeepgramLanguage").value.trim(),
+    DEEPGRAM_ENDPOINTING_MS: Number(document.getElementById("cfgDeepgramEndpointingMs").value),
     OVERALL_CAP_RULES: textToRules(document.getElementById("cfgOverallCapRules").value)
   };
   return sanitizeSettings(newSettings);
@@ -1093,6 +1465,417 @@ async function startIdReadLoop() {
     if (idPort && idPort.readable) setIdPortStatus("Connected, reader stopped");
     else setIdPortStatus("Disconnected");
   }
+}
+
+
+function saveVoiceEnabledPreference(enabled) {
+  try {
+    localStorage.setItem(VOICE_ENABLED_KEY, enabled ? "1" : "0");
+  } catch (e) {}
+}
+
+function loadVoiceEnabledPreference() {
+  try {
+    return localStorage.getItem(VOICE_ENABLED_KEY) === "1";
+  } catch (e) {
+    return false;
+  }
+}
+
+function setVoiceStatus(text) {
+  const el = document.getElementById("voiceStatus");
+  if (el) el.innerText = "Voice commands: " + text;
+}
+
+function normalizeVoiceCommand(text) {
+  return String(text || "")
+    .toLowerCase()
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeDeepgramCredential(raw) {
+  return String(raw || "")
+    .replace(/^Bearer\s+/i, "")
+    .replace(/^Token\s+/i, "")
+    .trim();
+}
+
+function getDeepgramSocketUrl() {
+  const params = new URLSearchParams({
+    model: settings.DEEPGRAM_MODEL || "nova-3",
+    language: settings.DEEPGRAM_LANGUAGE || "en-US",
+    punctuate: "true",
+    smart_format: "true",
+    interim_results: "true",
+    endpointing: String(Math.max(0, Number(settings.DEEPGRAM_ENDPOINTING_MS || 300))),
+    vad_events: "true",
+    encoding: "opus"
+  });
+  return "wss://api.deepgram.com/v1/listen?" + params.toString();
+}
+
+function scheduleDeepgramReconnect(delayMs = 2500) {
+  if (!deepgramSessionShouldStayOn || voiceOutputActive) return;
+  if (deepgramReconnectTimer) clearTimeout(deepgramReconnectTimer);
+
+  deepgramReconnectTimer = setTimeout(async () => {
+    deepgramReconnectTimer = null;
+    if (!deepgramSessionShouldStayOn || deepgramSessionRunning || deepgramConnectInProgress) return;
+    try {
+      await startDeepgramVoiceSession(true);
+    } catch (e) {
+      console.error("Deepgram reconnect failed:", e);
+      setVoiceStatus("Voice reconnect failed");
+    }
+  }, delayMs);
+}
+
+function startDeepgramKeepAlive() {
+  stopDeepgramKeepAlive();
+  deepgramKeepAliveTimer = setInterval(() => {
+    if (deepgramSocket && deepgramSocket.readyState === WebSocket.OPEN) {
+      try {
+        deepgramSocket.send(JSON.stringify({ type: "KeepAlive" }));
+      } catch (e) {
+        console.error("Deepgram KeepAlive failed:", e);
+      }
+    }
+  }, 3000);
+}
+
+function stopDeepgramKeepAlive() {
+  if (deepgramKeepAliveTimer) {
+    clearInterval(deepgramKeepAliveTimer);
+    deepgramKeepAliveTimer = null;
+  }
+}
+
+function stopDeepgramRecorder() {
+  if (deepgramMediaRecorder) {
+    try {
+      if (deepgramMediaRecorder.state !== "inactive") deepgramMediaRecorder.stop();
+    } catch (e) {}
+    deepgramMediaRecorder.ondataavailable = null;
+    deepgramMediaRecorder.onerror = null;
+    deepgramMediaRecorder.onstop = null;
+    deepgramMediaRecorder = null;
+  }
+
+  if (deepgramMediaStream) {
+    try {
+      deepgramMediaStream.getTracks().forEach(track => track.stop());
+    } catch (e) {}
+    deepgramMediaStream = null;
+  }
+}
+
+function closeDeepgramSocket() {
+  if (deepgramSocket) {
+    try {
+      if (deepgramSocket.readyState === WebSocket.OPEN) {
+        deepgramSocket.send(JSON.stringify({ type: "CloseStream" }));
+      }
+    } catch (e) {}
+    try { deepgramSocket.close(); } catch (e) {}
+    deepgramSocket = null;
+  }
+}
+
+function getSupportedRecordingMimeType() {
+  const candidates = [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/ogg;codecs=opus"
+  ];
+
+  for (const type of candidates) {
+    if (window.MediaRecorder && MediaRecorder.isTypeSupported(type)) return type;
+  }
+  return "";
+}
+
+async function executeVoiceCommand(rawText) {
+  const cmd = normalizeVoiceCommand(rawText);
+  if (!cmd) return false;
+
+  console.log("Voice heard:", cmd);
+
+  if (cmd.includes("stop")) {
+    setVoiceStatus('Heard: "' + cmd + '" → STOP');
+    await stopEspTest();
+    return true;
+  }
+
+  if (cmd.includes("program") || cmd.includes("programming")) {
+    setVoiceStatus('Heard: "' + cmd + '" → PROGRAM');
+    const btn = document.getElementById("programBtn");
+    if (btn) {
+      btn.click();
+      return true;
+    }
+    return false;
+  }
+
+  if (cmd.includes("connect") && cmd.includes("power")) {
+    setVoiceStatus('Heard: "' + cmd + '" → CONNECT POWER');
+    await connectPowerPort();
+    return true;
+  }
+
+  if (cmd.includes("connect") && cmd.includes("id")) {
+    setVoiceStatus('Heard: "' + cmd + '" → CONNECT ID');
+    await connectIdPort();
+    return true;
+  }
+
+  if (cmd.includes("test") || cmd.includes("start test")) {
+    setVoiceStatus('Heard: "' + cmd + '" → TEST');
+    await startTest();
+    return true;
+  }
+
+  setVoiceStatus('Unrecognized: "' + cmd + '"');
+  return false;
+}
+
+async function handleDeepgramTranscriptMessage(data) {
+  const alt = data && data.channel && data.channel.alternatives && data.channel.alternatives[0]
+    ? data.channel.alternatives[0]
+    : null;
+  const transcript = alt && alt.transcript ? String(alt.transcript).trim() : "";
+  if (!transcript) return;
+
+  deepgramLastHeardAt = Date.now();
+
+  if (voiceOutputActive || !voiceCommandProcessingEnabled) return;
+
+  if (data.is_final) {
+    deepgramTranscriptBuffer = (deepgramTranscriptBuffer + " " + transcript).trim();
+  } else {
+    setVoiceStatus('Hearing: "' + transcript + '"');
+  }
+
+  const readyText = data.speech_final
+    ? (deepgramTranscriptBuffer || transcript)
+    : (data.is_final ? deepgramTranscriptBuffer : "");
+
+  if (!readyText) return;
+
+  deepgramTranscriptBuffer = "";
+  voiceCommandProcessingEnabled = false;
+  try {
+    await executeVoiceCommand(readyText);
+  } finally {
+    if (!voiceOutputActive && deepgramSessionRunning && deepgramSessionShouldStayOn) {
+      voiceCommandProcessingEnabled = true;
+      setVoiceStatus("Listening");
+    }
+  }
+}
+
+async function startDeepgramVoiceSession(isReconnect = false) {
+  if (deepgramConnectInProgress || deepgramSessionRunning) return;
+
+  if (!settings.DEEPGRAM_VOICE_ENABLED) {
+    alert("Enable Deepgram Voice Commands in Configuration first.");
+    return;
+  }
+
+  const credential = normalizeDeepgramCredential(settings.DEEPGRAM_API_KEY);
+  if (!credential) {
+    alert("Add your Deepgram API key or temporary token in Configuration first.");
+    return;
+  }
+
+  if (!window.WebSocket) {
+    alert("WebSocket is not supported in this browser.");
+    return;
+  }
+
+  if (!window.MediaRecorder || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    alert("This browser does not support microphone streaming with MediaRecorder.");
+    return;
+  }
+
+  const mimeType = getSupportedRecordingMimeType();
+  if (!mimeType) {
+    alert("No supported audio recording MIME type was found for Deepgram streaming in this browser.");
+    return;
+  }
+
+  deepgramConnectInProgress = true;
+  setVoiceStatus(isReconnect ? "Reconnecting..." : "Starting...");
+
+  try {
+    deepgramTranscriptBuffer = "";
+    deepgramMediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      }
+    });
+
+    const socket = new WebSocket(getDeepgramSocketUrl(), ["token", credential]);
+    deepgramSocket = socket;
+
+    await new Promise((resolve, reject) => {
+      let opened = false;
+
+      socket.onopen = () => {
+        opened = true;
+        deepgramSessionRunning = true;
+        voiceRecognitionRunning = true;
+        voiceRecognitionSupported = true;
+        voiceRecognitionShouldStayOn = true;
+        voiceRecognitionBlockedByPermission = false;
+        voiceCommandProcessingEnabled = true;
+        deepgramReconnectAttempts = 0;
+        startDeepgramKeepAlive();
+        setVoiceStatus("Listening");
+        resolve();
+      };
+
+      socket.onerror = (event) => {
+        if (!opened) reject(new Error("Could not open Deepgram WebSocket."));
+        console.error("Deepgram socket error:", event);
+      };
+
+      socket.onmessage = async (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data && data.type === "Results") {
+            await handleDeepgramTranscriptMessage(data);
+            return;
+          }
+          if (data && data.type === "UtteranceEnd") {
+            const pending = deepgramTranscriptBuffer.trim();
+            if (pending && !voiceOutputActive && voiceCommandProcessingEnabled) {
+              deepgramTranscriptBuffer = "";
+              voiceCommandProcessingEnabled = false;
+              try {
+                await executeVoiceCommand(pending);
+              } finally {
+                if (!voiceOutputActive && deepgramSessionRunning && deepgramSessionShouldStayOn) {
+                  voiceCommandProcessingEnabled = true;
+                  setVoiceStatus("Listening");
+                }
+              }
+            }
+            return;
+          }
+          if (data && data.type === "Metadata") return;
+          if (data && data.type === "Warning") {
+            console.warn("Deepgram warning:", data);
+            return;
+          }
+          if (data && data.type === "Error") {
+            console.error("Deepgram error message:", data);
+            setVoiceStatus("Voice error");
+          }
+        } catch (e) {
+          console.error("Deepgram message parse error:", e);
+        }
+      };
+
+      socket.onclose = () => {
+        stopDeepgramKeepAlive();
+        deepgramSessionRunning = false;
+        voiceRecognitionRunning = false;
+        deepgramConnectInProgress = false;
+        stopDeepgramRecorder();
+        if (deepgramSocket === socket) deepgramSocket = null;
+
+        if (deepgramSessionShouldStayOn) {
+          voiceCommandProcessingEnabled = false;
+          deepgramReconnectAttempts += 1;
+          setVoiceStatus("Reconnecting...");
+          scheduleDeepgramReconnect(Math.min(7000, 2000 + (deepgramReconnectAttempts * 1000)));
+        } else {
+          setVoiceStatus("Stopped");
+        }
+      };
+    });
+
+    deepgramMediaRecorder = new MediaRecorder(deepgramMediaStream, mimeType ? { mimeType } : undefined);
+    deepgramMediaRecorder.ondataavailable = async (event) => {
+      try {
+        if (!event.data || !event.data.size) return;
+        if (!deepgramSocket || deepgramSocket.readyState !== WebSocket.OPEN) return;
+        const buffer = await event.data.arrayBuffer();
+        deepgramSocket.send(buffer);
+      } catch (e) {
+        console.error("Deepgram audio send failed:", e);
+      }
+    };
+    deepgramMediaRecorder.onerror = (event) => {
+      console.error("MediaRecorder error:", event);
+      setVoiceStatus("Voice recorder error");
+    };
+    deepgramMediaRecorder.start(250);
+  } catch (e) {
+    stopDeepgramKeepAlive();
+    stopDeepgramRecorder();
+    closeDeepgramSocket();
+    deepgramSessionRunning = false;
+    voiceRecognitionRunning = false;
+    voiceCommandProcessingEnabled = false;
+    setVoiceStatus("Start failed");
+    throw e;
+  } finally {
+    deepgramConnectInProgress = false;
+  }
+}
+
+function startVoiceCommands() {
+  deepgramSessionShouldStayOn = true;
+  voiceRecognitionShouldStayOn = true;
+  voiceRecognitionBlockedByPermission = false;
+  saveVoiceEnabledPreference(true);
+
+  if (deepgramSessionRunning || deepgramConnectInProgress) {
+    setVoiceStatus("Listening");
+    return;
+  }
+
+  startDeepgramVoiceSession(false).catch((e) => {
+    console.error("Deepgram start failed:", e);
+    const msg = e && e.message ? e.message : String(e || "Unknown error");
+    if (msg.toLowerCase().includes("permission") || msg.toLowerCase().includes("denied")) {
+      setVoiceStatus("Microphone permission denied");
+    } else {
+      setVoiceStatus("Start failed");
+    }
+  });
+}
+
+function stopVoiceCommands() {
+  deepgramSessionShouldStayOn = false;
+  voiceRecognitionShouldStayOn = false;
+  voiceRecognitionRunning = false;
+  voiceRecognitionBlockedByPermission = false;
+  voiceCommandProcessingEnabled = false;
+  voiceOutputActive = false;
+  deepgramTranscriptBuffer = "";
+
+  if (voiceOutputResumeTimer) {
+    clearTimeout(voiceOutputResumeTimer);
+    voiceOutputResumeTimer = null;
+  }
+
+  if (deepgramReconnectTimer) {
+    clearTimeout(deepgramReconnectTimer);
+    deepgramReconnectTimer = null;
+  }
+
+  saveVoiceEnabledPreference(false);
+  stopDeepgramKeepAlive();
+  stopDeepgramRecorder();
+  closeDeepgramSocket();
+  deepgramSessionRunning = false;
+  setVoiceStatus("Stopped");
 }
 
 const ctx = document.getElementById('adcChart').getContext('2d');
@@ -1341,6 +2124,7 @@ async function startTest() {
         const finalResult = (passId && passSleep && passBurst && passOverall) ? "PASS" : "FAIL";
         document.getElementById("testResult").innerText =
           finalResult + (reasons.length ? " [" + reasons.join(", ") + "]" : "");
+        speakTestResult(finalResult, reasons.join(";"));
 
         lastTestData = {
           serial,
@@ -1542,8 +2326,18 @@ document.getElementById("programBtn").onclick = async () => {
     }
   }
 };
+document.getElementById("loadFirmwareBtn").onclick = async () => {
+  try {
+    await chooseFirmwareFileOnly();
+  } catch (e) {
+    console.error(e);
+    alert("Firmware load failed: " + (e.message || e));
+  }
+};
 document.getElementById("connect").onclick = startTest;
 document.getElementById("stopEspBtn").onclick = stopEspTest;
+document.getElementById("voiceCmdBtn").onclick = startVoiceCommands;
+document.getElementById("voiceCmdStopBtn").onclick = stopVoiceCommands;
 document.getElementById("retryBtn").onclick = () => { startTest(); };
 
 document.getElementById("sendFailBtn").onclick = async () => {
@@ -1580,6 +2374,10 @@ setProgrammerStatus("Idle");
 setProgrammerDetail("-");
 clearProgrammingLog();
 setInterval(() => cleanupExpiredIdEvents(true), 250);
+
+// Voice is only started from the Start Voice button to avoid browser mic permission pop-up loops.
+// While spoken feedback plays, the mic session stays alive and only command handling is disabled in software.
+
 </script>
 </body>
 </html>
