@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>BLE Automated Power Test + ThingsBoard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+body { background:#0f172a; color:#e2e8f0; font-family:Arial; padding:20px; }
+.card { background:#1e293b; padding:15px; border-radius:10px; margin-bottom:10px; }
+button { padding:10px; border:none; border-radius:6px; background:#3b82f6; color:white; cursor:pointer; margin-right:5px; margin-top:5px; }
+input { padding:6px; margin:5px; border-radius:6px; border:none; }
+.pass { color:lime; font-weight:bold; }
+.fail { color:red; font-weight:bold; }
+label { display:inline-block; width:140px; }
+#manualButtons { margin-top:10px; }
+.statusBox { margin-top:10px; padding:8px; background:#0f172a; border-radius:6px; }
+.small { font-size:12px; color:#94a3b8; }
+
+/* Barcode popup */
+#barcodeModal {
+  display: none;
+  position: fixed;
+  z-index: 9999;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0,0,0,0.75);
+}
+#barcodeModalContent {
+  background: #1e293b;
+  margin: 10% auto;
+  padding: 20px;
+  border-radius: 12px;
+  width: 90%;
+  max-width: 500px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.5);
+}
+#barcodeInput {
+  width: calc(100% - 20px);
+  font-size: 18px;
+  padding: 12px;
+  margin-top: 10px;
+  margin-bottom: 15px;
+}
+#barcodeStatus {
+  margin-top: 10px;
+  color: #94a3b8;
+}
+</style>
+</head>
+<body>
+
+<h2>SEAL PROFILER</h2>
+
+<div class="card" id="loginCard">
+  <input id="password" type="password" placeholder="ThingsBoard Password">
+  <button id="loginBtn">Login</button>
+  <p id="loginStatus"></p>
+</div>
+
+<div class="card" id="testCard">
+  Device Serial: <input id="deviceSerial"><br><br>
+
+  <button id="connectPowerPortBtn">Connect Power COM</button>
+  <button id="connectIdPortBtn">Connect ID COM</button>
+  <button id="connect">Start Test</button>
+
+  <div class="statusBox">
+    <div>Power Port: <span id="powerPortStatus">Not connected</span></div>
+    <div>ID Port: <span id="idPortStatus">Not connected</span></div>
+    <div>Last ID Seen: <span id="lastSeenId">-</span></div>
+    <div>Last RSSI Seen: <span id="lastSeenRssi">-</span></div>
+    <div>Peak-Matched ID: <span id="peakMatchedId">-</span></div>
+    <div>ID Window: <span id="idWindowStatus">Idle</span></div>
+    <div>Last Barcode Label: <span id="lastBarcodeLabel">-</span></div>
+  </div>
+
+  <p>Max Burst: <span id="maxValue">0</span> µA</p>
+  <p>Sleep Avg: <span id="sleepAvg">0</span> µA</p>
+  <p>Overall Avg: <span id="overallAvg">0</span> µA</p>
+  <p>Burst Count: <span id="burstCount">0</span></p>
+
+  <p>Result: <span id="testResult">WAITING</span></p>
+
+  <div id="manualButtons" style="display:none;">
+    <button id="retryBtn">Retry</button>
+    <button id="sendFailBtn">Send Failure</button>
+  </div>
+
+  <p class="small">
+    ID format expected on second COM port: RSSI:-60 ID:11479E73A94E6B58
+  </p>
+
+  <canvas id="adcChart" height="30"></canvas>
+</div>
+
+<div class="card">
+  <h3>Test History</h3>
+  <table border="1" width="100%">
+    <tr>
+      <th>Time</th>
+      <th>Serial</th>
+      <th>Barcode Label</th>
+      <th>Sleep Avg</th>
+      <th>Burst</th>
+      <th>Overall Avg</th>
+      <th>Result</th>
+    </tr>
+    <tbody id="history"></tbody>
+  </table>
+</div>
+
+<!-- Barcode Modal -->
+<div id="barcodeModal">
+  <div id="barcodeModalContent">
+    <h3>Scan Barcode</h3>
+    <p>Test passed. Please scan the board barcode now.</p>
+    <input id="barcodeInput" type="text" placeholder="Scan barcode here">
+    <br>
+    <button id="barcodeSaveBtn">Save Barcode</button>
+    <button id="barcodeCancelBtn">Cancel</button>
+    <div id="barcodeStatus">Waiting for barcode scan...</div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// ====================== EASY SETTINGS ========================
+// ============================================================
+
+// -------- ThingsBoard --------
+const SERVER = "https://thingsboard.intarget.mobi";
+const USERNAME = "dman@ioti.mobi";
+
+// -------- Serial settings --------
+const POWER_PORT_BAUD = 115200;
+const ID_PORT_BAUD = 115200;
+
+// -------- Test timing --------
+const TEST_DURATION_MS = 60000;      // 15000 = 15 sec, 60000 = 60 sec, 150000 = 150 sec
+
+// -------- ID matching window --------
+const ID_CAPTURE_PAST_MS = 400;      // look this far back from burst
+const ID_CAPTURE_FUTURE_MS = 400;    // look this far forward from burst
+const ID_EVENT_HISTORY_MS = 10000;   // keep ID history this long
+
+// -------- Electrical thresholds --------
+const SLEEP_THRESHOLD_UA = 200;      // sleep average must stay below this
+const BURST_THRESHOLD_UA = 600;      // must exceed this to count as a burst
+const MIN_CURRENT_UA = 0.1;          // clamp minimum current for log scale chart
+
+// -------- Optional ID filtering --------
+const ENABLE_RSSI_FILTER = false;    // true = only accept IDs stronger than threshold below
+const RSSI_MIN_DBM = -70;            // only used if ENABLE_RSSI_FILTER = true
+
+// -------- Chart settings --------
+const CHART_MAX_POINTS = 2000;
+const CHART_Y_MIN_UA = 1;
+const CHART_Y_MAX_UA = 25000;
+
+// -------- Sleep averaging --------
+const SLEEP_WINDOW_SIZE = 20;
+
+// -------- Overall average caps by burst count --------
+// Format: if burstCount > burstMin, overall average must be <= cap
+const OVERALL_CAP_RULES = [
+  { burstMin: 45, cap: 120 },
+  { burstMin: 40, cap: 110 },
+  { burstMin: 35, cap: 100 },
+  { burstMin: 30, cap: 90 },
+  { burstMin: 25, cap: 80 },
+  { burstMin: 20, cap: 70 },
+  { burstMin: -1, cap: 60 } // default
+];
+
+// ============================================================
+// ===================== RUNTIME STATE ========================
+// ============================================================
+
+let jwtToken = null;
+
+let powerPort = null;
+let powerReader = null;
+
+let idPort = null;
+let idReader = null;
+let idReadLoopRunning = false;
+let idBuffer = "";
+
+let latestIdData = {
+  id: "",
+  rssi: "",
+  timestamp: 0,
+  raw: ""
+};
+
+let recentIdEvents = [];
+let lastTestData = null;
+let lastBarcodeLabel = "";
+
+let idCaptureWindowActive = false;
+let idCaptureWindowEnd = 0;
+let idWindowEvents = [];
+
+// ============================================================
+// ======================== CHART =============================
+// ============================================================
+
+const ctx = document.getElementById('adcChart').getContext('2d');
+const chart = new Chart(ctx, {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [{
+      label: 'Current (µA)',
+      data: [],
+      borderColor: 'red',
+      backgroundColor: 'rgba(255,0,0,0.2)',
+      fill: true
+    }]
+  },
+  options: {
+    animation: false,
+    responsive: true,
+    scales: {
+      y: {
+        type: 'logarithmic',
+        min: CHART_Y_MIN_UA,
+        max: CHART_Y_MAX_UA,
+        ticks: {
+          callback: function(value) {
+            return value + ' µA';
+          }
+        }
+      }
+    }
+  }
+});
+
+// ============================================================
+// ========================= LOGIN ============================
+// ============================================================
+
+document.getElementById("loginBtn").onclick = async () => {
+  const password = document.getElementById("password").value;
+  document.getElementById("loginStatus").innerText = "Logging in...";
+
+  try {
+    const res = await fetch(SERVER + "/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: USERNAME, password })
+    });
+
+    if (!res.ok) {
+      document.getElementById("loginStatus").innerText = "❌ Failed";
+      return;
+    }
+
+    jwtToken = (await res.json()).token;
+    document.getElementById("loginStatus").innerText = "✅ Logged in";
+    document.getElementById("loginCard").style.display = "none";
+  } catch (e) {
+    document.getElementById("loginStatus").innerText = "❌ Error";
+    console.error(e);
+  }
+};
+
+// ============================================================
+// ======================== HELPERS ===========================
+// ============================================================
+
+function clearSerialOnly() {
+  document.getElementById("deviceSerial").value = '';
+}
+
+function setPowerPortStatus(text) {
+  document.getElementById("powerPortStatus").innerText = text;
+}
+
+function setIdPortStatus(text) {
+  document.getElementById("idPortStatus").innerText = text;
+}
+
+function updateLastIdDisplay() {
+  document.getElementById("lastSeenId").innerText = latestIdData.id || "-";
+  document.getElementById("lastSeenRssi").innerText = latestIdData.rssi || "-";
+}
+
+function setIdWindowStatus(text) {
+  document.getElementById("idWindowStatus").innerText = text;
+}
+
+function updateLastBarcodeLabel(text) {
+  lastBarcodeLabel = text || "";
+  document.getElementById("lastBarcodeLabel").innerText = lastBarcodeLabel || "-";
+}
+
+function getOverallCap(burstCount) {
+  for (const rule of OVERALL_CAP_RULES) {
+    if (burstCount > rule.burstMin) {
+      return rule.cap;
+    }
+  }
+  return 30;
+}
+
+function resetUiForNewTest() {
+  chart.data.labels = [];
+  chart.data.datasets[0].data = [];
+  chart.data.datasets[0].backgroundColor = [];
+  chart.update();
+
+  document.getElementById("maxValue").innerText = 0;
+  document.getElementById("sleepAvg").innerText = 0;
+  document.getElementById("overallAvg").innerText = 0;
+  document.getElementById("burstCount").innerText = 0;
+  document.getElementById("testResult").innerText = "RUNNING";
+  document.getElementById("manualButtons").style.display = "none";
+  document.getElementById("peakMatchedId").innerText = "-";
+  setIdWindowStatus("Idle");
+
+  lastTestData = null;
+  idCaptureWindowActive = false;
+  idCaptureWindowEnd = 0;
+  idWindowEvents = [];
+}
+
+// ============================================================
+// ====================== ID PROCESSING =======================
+// ============================================================
+
+function parseIdLine(line) {
+  const match = line.match(/RSSI:\s*(-?\d+)\s+ID:\s*([0-9A-Fa-f]+)/i);
+  if (!match) return null;
+
+  const parsed = {
+    rssi: parseInt(match[1], 10),
+    id: match[2].toUpperCase(),
+    timestamp: Date.now(),
+    raw: line.trim()
+  };
+
+  if (ENABLE_RSSI_FILTER && parsed.rssi < RSSI_MIN_DBM) {
+    return null;
+  }
+
+  return parsed;
+}
+
+function rememberIdEvent(obj) {
+  latestIdData = obj;
+  recentIdEvents.push(obj);
+
+  const cutoff = Date.now() - ID_EVENT_HISTORY_MS;
+  recentIdEvents = recentIdEvents.filter(e => e.timestamp >= cutoff);
+
+  if (idCaptureWindowActive) {
+    idWindowEvents.push(obj);
+  }
+
+  updateLastIdDisplay();
+}
+
+function getBestIdEvent(events) {
+  if (!events || events.length === 0) return null;
+
+  let best = events[0];
+
+  for (let i = 1; i < events.length; i++) {
+    const e = events[i];
+    if (
+      e.rssi > best.rssi ||
+      (e.rssi === best.rssi && e.timestamp > best.timestamp)
+    ) {
+      best = e;
+    }
+  }
+
+  return best;
+}
+
+function startIdCaptureWindow() {
+  if (idCaptureWindowActive) return;
+
+  const now = Date.now();
+  const pastCutoff = now - ID_CAPTURE_PAST_MS;
+
+  idCaptureWindowActive = true;
+  idCaptureWindowEnd = now + ID_CAPTURE_FUTURE_MS;
+  idWindowEvents = recentIdEvents.filter(e => e.timestamp >= pastCutoff);
+
+  setIdWindowStatus(`Capturing: -${ID_CAPTURE_PAST_MS}ms / +${ID_CAPTURE_FUTURE_MS}ms`);
+}
+
+function finishIdCaptureWindow() {
+  if (!idCaptureWindowActive) return;
+
+  idCaptureWindowActive = false;
+  idCaptureWindowEnd = 0;
+
+  if (idWindowEvents.length > 0) {
+    const picked = getBestIdEvent(idWindowEvents);
+    document.getElementById("deviceSerial").value = picked.id;
+    document.getElementById("peakMatchedId").innerText = picked.id;
+    setIdWindowStatus(`Captured: ${picked.id} (RSSI ${picked.rssi})`);
+  } else {
+    setIdWindowStatus("No ID seen around peak");
+  }
+
+  idWindowEvents = [];
+}
+
+// ============================================================
+// ===================== SERIAL PORTS =========================
+// ============================================================
+
+async function connectPowerPort() {
+  try {
+    powerPort = await navigator.serial.requestPort();
+    await powerPort.open({ baudRate: POWER_PORT_BAUD });
+    setPowerPortStatus(`Connected @ ${POWER_PORT_BAUD}`);
+  } catch (e) {
+    console.error(e);
+    alert("Power COM port not selected/opened.");
+  }
+}
+
+async function connectIdPort() {
+  try {
+    idPort = await navigator.serial.requestPort();
+    await idPort.open({ baudRate: ID_PORT_BAUD });
+    setIdPortStatus(`Connected @ ${ID_PORT_BAUD}`);
+    startIdReadLoop();
+  } catch (e) {
+    console.error(e);
+    alert("ID COM port not selected/opened.");
+  }
+}
+
+async function startIdReadLoop() {
+  if (!idPort || !idPort.readable || idReadLoopRunning) return;
+
+  idReadLoopRunning = true;
+  idReader = idPort.readable.getReader();
+
+  try {
+    while (true) {
+      const { value, done } = await idReader.read();
+      if (done) break;
+      if (!value) continue;
+
+      idBuffer += new TextDecoder().decode(value);
+      const lines = idBuffer.split(/\r?\n/);
+      idBuffer = lines.pop();
+
+      for (const line of lines) {
+        const parsed = parseIdLine(line);
+        if (parsed) {
+          rememberIdEvent(parsed);
+        }
+      }
+    }
+  } catch (e) {
+    console.error("ID port read loop error:", e);
+  } finally {
+    try { idReader.releaseLock(); } catch (e) {}
+    idReader = null;
+    idReadLoopRunning = false;
+
+    if (idPort && idPort.readable) setIdPortStatus("Connected, reader stopped");
+    else setIdPortStatus("Disconnected");
+  }
+}
+
+// ============================================================
+// ===================== BARCODE POPUP ========================
+// ============================================================
+
+function askForBarcodeAfterPass() {
+  return new Promise((resolve) => {
+    const modal = document.getElementById("barcodeModal");
+    const input = document.getElementById("barcodeInput");
+    const saveBtn = document.getElementById("barcodeSaveBtn");
+    const cancelBtn = document.getElementById("barcodeCancelBtn");
+    const status = document.getElementById("barcodeStatus");
+
+    modal.style.display = "block";
+    input.value = "";
+    status.innerText = "Waiting for barcode scan...";
+
+    setTimeout(() => input.focus(), 100);
+
+    function cleanup() {
+      saveBtn.onclick = null;
+      cancelBtn.onclick = null;
+      input.onkeydown = null;
+      modal.style.display = "none";
+    }
+
+    saveBtn.onclick = () => {
+      const barcode = input.value.trim();
+      if (!barcode) {
+        status.innerText = "Please scan or enter a barcode.";
+        input.focus();
+        return;
+      }
+      cleanup();
+      resolve(barcode);
+    };
+
+    cancelBtn.onclick = () => {
+      cleanup();
+      resolve(null);
+    };
+
+    input.onkeydown = (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        saveBtn.click();
+      }
+    };
+  });
+}
+
+// ============================================================
+// ======================== TEST RUN ==========================
+// ============================================================
+
+async function startTest() {
+  if (!jwtToken) {
+    alert("Login first");
+    return;
+  }
+
+  resetUiForNewTest();
+
+  if (!powerPort) {
+    await connectPowerPort();
+  }
+  if (!powerPort || !powerPort.readable) {
+    alert("Connect the Power COM port first.");
+    return;
+  }
+
+  if (!idPort) {
+    const proceed = confirm("ID COM port is not connected. Continue without auto ID?");
+    if (!proceed) return;
+  } else if (!idReadLoopRunning) {
+    startIdReadLoop();
+  }
+
+  if (powerReader) {
+    try { await powerReader.cancel(); } catch (e) {}
+    powerReader = null;
+  }
+
+  powerReader = powerPort.readable.getReader();
+
+  let maxBurst = 0;
+  let totalSum = 0;
+  let totalCount = 0;
+  let burstCount = 0;
+  const sleepWindow = [];
+
+  try {
+    let buffer = '';
+    const start = Date.now();
+
+    while (true) {
+      const { value, done } = await powerReader.read();
+      if (done) break;
+
+      if (value) {
+        buffer += new TextDecoder().decode(value);
+        const lines = buffer.split(/\r?\n/);
+        buffer = lines.pop();
+
+        lines.forEach(line => {
+          const match = line.match(/Current:\s*([\d.]+)/i);
+          if (!match) return;
+
+          const current = Math.max(parseFloat(match[1]) * 1000, MIN_CURRENT_UA);
+
+          chart.data.labels.push('');
+          chart.data.datasets[0].data.push(current);
+          chart.data.datasets[0].backgroundColor.push(current >= BURST_THRESHOLD_UA ? 'gold' : 'red');
+
+          if (chart.data.labels.length > CHART_MAX_POINTS) {
+            chart.data.labels.shift();
+            chart.data.datasets[0].data.shift();
+            chart.data.datasets[0].backgroundColor.shift();
+          }
+
+          chart.update();
+
+          if (current > maxBurst) maxBurst = current;
+
+          if (current >= BURST_THRESHOLD_UA) {
+            burstCount++;
+            if (!idCaptureWindowActive) {
+              startIdCaptureWindow();
+            }
+          }
+
+          document.getElementById("burstCount").innerText = burstCount;
+
+          if (current <= SLEEP_THRESHOLD_UA) {
+            sleepWindow.push(current);
+            if (sleepWindow.length > SLEEP_WINDOW_SIZE) sleepWindow.shift();
+
+            const sleepAvgLive = sleepWindow.reduce((a, b) => a + b, 0) / sleepWindow.length;
+            document.getElementById("sleepAvg").innerText = Math.round(sleepAvgLive);
+          }
+
+          totalSum += current;
+          totalCount++;
+
+          document.getElementById("overallAvg").innerText = Math.round(totalSum / totalCount);
+          document.getElementById("maxValue").innerText = Math.round(maxBurst);
+        });
+      }
+
+      if (idCaptureWindowActive && Date.now() >= idCaptureWindowEnd) {
+        finishIdCaptureWindow();
+      }
+
+      if (Date.now() - start >= TEST_DURATION_MS) {
+        if (idCaptureWindowActive) {
+          finishIdCaptureWindow();
+        }
+
+        const sleepAvg = sleepWindow.length
+          ? sleepWindow.reduce((a, b) => a + b, 0) / sleepWindow.length
+          : 0;
+
+        const overallAvg = totalCount ? totalSum / totalCount : 0;
+
+        let serial = document.getElementById("deviceSerial").value.trim();
+        if (!serial && latestIdData.id) {
+          serial = latestIdData.id;
+          document.getElementById("deviceSerial").value = serial;
+        }
+
+        if (!serial) {
+          alert("No serial ID detected from ID COM port and no manual serial entered.");
+          document.getElementById("testResult").innerText = "FAIL [No serial ID detected]";
+          break;
+        }
+
+        const overallCap = getOverallCap(burstCount);
+
+        const passSleep = sleepAvg < SLEEP_THRESHOLD_UA;
+        const passBurst = maxBurst > BURST_THRESHOLD_UA;
+        const passOverall = overallAvg <= overallCap;
+
+        let reasons = [];
+        if (!passSleep) reasons.push(`Sleep Avg > ${SLEEP_THRESHOLD_UA} µA`);
+        if (!passBurst) reasons.push(`Burst < ${BURST_THRESHOLD_UA} µA`);
+        if (!passOverall) reasons.push(`Overall Avg > ${overallCap} µA`);
+
+        const finalResult = (passSleep && passBurst && passOverall) ? "PASS" : "FAIL";
+        document.getElementById("testResult").innerText =
+          finalResult + (reasons.length ? " [" + reasons.join(", ") + "]" : "");
+
+        lastTestData = {
+          serial,
+          sleepAvg,
+          burstCount,
+          maxBurst,
+          overallAvg,
+          finalResult,
+          reasons: reasons.join(";")
+        };
+
+        if (finalResult === "FAIL") {
+          document.getElementById("manualButtons").style.display = "block";
+        } else {
+          const barcodeLabel = await askForBarcodeAfterPass();
+
+          if (!barcodeLabel) {
+            alert("Barcode scan cancelled. PASS result not sent to ThingsBoard.");
+            break;
+          }
+
+          updateLastBarcodeLabel(barcodeLabel);
+
+          try {
+            await sendToThingsBoard(
+              serial,
+              barcodeLabel,
+              sleepAvg,
+              burstCount,
+              maxBurst,
+              overallAvg,
+              finalResult,
+              reasons.join(";")
+            );
+            addHistory(serial, barcodeLabel, sleepAvg, burstCount, maxBurst, overallAvg, finalResult);
+            clearSerialOnly();
+          } catch (e) {
+            console.error(e);
+            alert("❌ Send to ThingsBoard failed. Test history not saved.");
+          }
+        }
+
+        break;
+      }
+    }
+
+    try { powerReader.releaseLock(); } catch (e) {}
+    powerReader = null;
+
+  } catch (e) {
+    console.error(e);
+    alert("Error: " + e);
+    try { powerReader.releaseLock(); } catch (x) {}
+    powerReader = null;
+  }
+}
+
+// ============================================================
+// ========================= BUTTONS ==========================
+// ============================================================
+
+document.getElementById("connectPowerPortBtn").onclick = connectPowerPort;
+document.getElementById("connectIdPortBtn").onclick = connectIdPort;
+document.getElementById("connect").onclick = startTest;
+
+document.getElementById("retryBtn").onclick = () => {
+  startTest();
+};
+
+document.getElementById("sendFailBtn").onclick = async () => {
+  if (lastTestData) {
+    const d = lastTestData;
+    try {
+      await sendToThingsBoard(
+        d.serial,
+        "",
+        d.sleepAvg,
+        d.burstCount,
+        d.maxBurst,
+        d.overallAvg,
+        d.finalResult,
+        d.reasons
+      );
+      addHistory(d.serial, "", d.sleepAvg, d.burstCount, d.maxBurst, d.overallAvg, d.finalResult);
+      clearSerialOnly();
+      document.getElementById("manualButtons").style.display = "none";
+    } catch (e) {
+      console.error(e);
+      alert("❌ Send to ThingsBoard failed. Test history not saved.");
+    }
+  }
+};
+
+// ============================================================
+// ==================== THINGSBOARD SEND ======================
+// ============================================================
+
+async function sendToThingsBoard(serial, barcodeLabel, sleepAvg, burstCount, peak, avg, result, reason) {
+  const deviceBody = {
+    name: serial,
+    type: "BLE Device"
+  };
+
+  if (barcodeLabel) {
+    deviceBody.label = barcodeLabel;
+  }
+
+  const deviceRes = await fetch(SERVER + "/api/device", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Authorization": "Bearer " + jwtToken
+    },
+    body: JSON.stringify(deviceBody)
+  });
+
+  if (!deviceRes.ok) throw new Error("Device creation failed");
+
+  const device = await deviceRes.json();
+  const deviceId = device.id.id;
+
+  const credRes = await fetch(SERVER + "/api/device/" + deviceId + "/credentials", {
+    headers: { "X-Authorization": "Bearer " + jwtToken }
+  });
+
+  if (!credRes.ok) throw new Error("Get credentials failed");
+  const cred = await credRes.json();
+
+  const telemetryRes = await fetch(SERVER + "/api/v1/" + cred.credentialsId + "/telemetry", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      serial_number: serial,
+      board_barcode: barcodeLabel || "",
+      sleep_avg: sleepAvg,
+      burst_count: burstCount,
+      ble_peak: peak,
+      overall_avg: avg,
+      pass_fail: result,
+      failure_reason: reason,
+      test_time: Date.now()
+    })
+  });
+
+  if (!telemetryRes.ok) throw new Error("Send telemetry failed");
+}
+
+// ============================================================
+// ========================= HISTORY ==========================
+// ============================================================
+
+function addHistory(serial, barcodeLabel, sleepAvg, burstCount, peak, avg, result) {
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td>${new Date().toLocaleTimeString()}</td>
+    <td>${serial}</td>
+    <td>${barcodeLabel || "-"}</td>
+    <td>${sleepAvg.toFixed(1)}</td>
+    <td>${burstCount}</td>
+    <td>${avg.toFixed(1)}</td>
+    <td class="${result === 'PASS' ? 'pass' : 'fail'}">${result}</td>
+  `;
+  document.getElementById("history").appendChild(tr);
+}
+</script>
+
+</body>
+</html>
