@@ -4,14 +4,6 @@
 <meta charset="UTF-8">
 <title>BLE Automated Power Test + ThingsBoard</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script src="https://unpkg.com/html5-qrcode"></script>
-<script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
-
-<script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
-window.__firebase = { initializeApp, getDatabase, ref, set, onValue };
-</script>
 
 <style>
 body { background:#0f172a; color:#e2e8f0; font-family:Arial; padding:20px; }
@@ -55,9 +47,7 @@ label { display:inline-block; width:180px; }
   margin-top: 10px;
   margin-bottom: 15px;
 }
-#barcodeStatus, #phoneWaitStatus { margin-top: 10px; color: #94a3b8; }
-#phoneReader { width: 100%; max-width: 420px; border-radius: 8px; overflow: hidden; margin-top: 10px; }
-#phoneQrCanvas { background:#fff; padding:8px; border-radius:8px; }
+#barcodeStatus { margin-top: 10px; color: #94a3b8; }
 </style>
 </head>
 <body>
@@ -105,24 +95,6 @@ label { display:inline-block; width:180px; }
   </div>
 
   <div class="card">
-    <h3>Phone Scanner Session</h3>
-    <div class="row">
-      <div class="col">
-        <p class="small">Technician scans this QR once at the start of the day. If the phone closes or refreshes, scan the same QR again.</p>
-        <div><b>Session Room:</b> <span id="phoneRoomDisplay" class="mono">-</span></div>
-        <div><b>Sync Status:</b> <span id="syncStatus">Local only</span></div>
-        <div><b>Phone Link:</b></div>
-        <div id="phoneLinkDisplay" class="mono small">-</div>
-        <button id="copyPhoneLinkBtn">Copy Phone Link</button>
-        <button id="regenPhoneRoomBtn" class="secondary">New Day Session</button>
-      </div>
-      <div class="col">
-        <canvas id="phoneQrCanvas"></canvas>
-      </div>
-    </div>
-  </div>
-
-  <div class="card">
     <h3>Test History</h3>
     <table border="1" width="100%">
       <tr>
@@ -139,30 +111,6 @@ label { display:inline-block; width:180px; }
   </div>
 </div>
 
-<div id="phoneApp" class="hidden">
-  <div class="card">
-    <h3>Phone Barcode Scanner</h3>
-    <div>Room: <span id="phoneModeRoom" class="mono">-</span></div>
-    <div>Status: <span id="phoneModeStatus">Ready</span></div>
-    <div>Last Scan: <span id="phoneModeLastScan">-</span></div>
-    <button id="startPhoneScannerBtn" class="success">Start Camera Scanner</button>
-    <button id="stopPhoneScannerBtn" class="secondary">Stop Scanner</button>
-    <div id="phoneReader"></div>
-    <p class="small">Keep this page open. After each test passes on the PC, scan the board barcode here.</p>
-  </div>
-</div>
-
-<div id="barcodeChoiceModal" class="modal">
-  <div class="modal-content">
-    <h3>Test Passed</h3>
-    <p>Please choose how to scan the board barcode.</p>
-    <button id="choosePcScannerBtn" class="success">Use PC Scanner</button>
-    <button id="choosePhoneScannerBtn" class="warn">Use Phone Scanner</button>
-    <button id="barcodeChoiceCancelBtn" class="secondary">Cancel</button>
-    <div id="barcodeChoiceStatus" class="small"></div>
-  </div>
-</div>
-
 <div id="barcodeModal" class="modal">
   <div class="modal-content">
     <h3>Scan Barcode</h3>
@@ -175,38 +123,10 @@ label { display:inline-block; width:180px; }
   </div>
 </div>
 
-<div id="phoneWaitModal" class="modal">
-  <div class="modal-content">
-    <h3>Waiting For Phone Barcode</h3>
-    <p>Use the phone scanner page to scan the board barcode.</p>
-    <div><b>Room:</b> <span id="phoneWaitRoom" class="mono">-</span></div>
-    <div><b>Link:</b></div>
-    <div id="phoneWaitLink" class="mono small">-</div>
-    <div id="phoneWaitStatus">Waiting for next phone scan...</div>
-    <br>
-    <button id="phoneWaitCancelBtn" class="secondary">Cancel</button>
-  </div>
-</div>
-
 <script>
 // -------- ThingsBoard --------
 const SERVER = "https://thingsboard.intarget.mobi";
 const USERNAME = "dman@ioti.mobi";
-
-// -------- IMPORTANT: your public GitHub Pages URL --------
-const SITE_BASE_URL = "https://jacquevanvuuren.github.io/Seal-TestJig/";
-
-// -------- Firebase for phone -> PC sync --------
-// You MUST fill these 7 values from Firebase Console for phone sync to work.
-const firebaseConfig = {
-  apiKey: "AIzaSyDXrsMZ_nbPeE9VAFHeRM419ZhSy55w7v0",
-  authDomain: "seal-1cdc1.firebaseapp.com",
-  databaseURL: "https://seal-1cdc1-default-rtdb.firebaseio.com",
-  projectId: "seal-1cdc1",
-  storageBucket: "seal-1cdc1.firebasestorage.app",
-  messagingSenderId: "187227946861",
-  appId: "1:187227946861:web:4f835956100d4bcfe0a464"
-};
 
 // -------- Serial settings --------
 const POWER_PORT_BAUD = 115200;
@@ -248,11 +168,6 @@ const OVERALL_CAP_RULES = [
   { burstMin: -1, cap: 90 }
 ];
 
-// -------- Daily phone session --------
-const PHONE_SESSION_STORAGE_KEY = "sealProfilerPhoneSessionV1";
-const PHONE_SESSION_PREFIX = "seal-room";
-const PHONE_SESSION_DATE_FORMAT = new Date().toISOString().slice(0, 10);
-
 let jwtToken = null;
 let powerPort = null;
 let powerReader = null;
@@ -267,34 +182,49 @@ let lastBarcodeLabel = "";
 let idCaptureWindowActive = false;
 let idCaptureWindowEnd = 0;
 let idWindowEvents = [];
-let syncRoom = "";
-let syncEnabled = false;
-let db = null;
-let phoneBarcodeRef = null;
-let lastPhoneScanSeen = null;
-let html5QrScanner = null;
 
-function clearSerialOnly() { document.getElementById("deviceSerial").value = ''; }
-function setPowerPortStatus(text) { document.getElementById("powerPortStatus").innerText = text; }
-function setIdPortStatus(text) { document.getElementById("idPortStatus").innerText = text; }
+function clearSerialOnly() {
+  document.getElementById("deviceSerial").value = '';
+}
+
+function setPowerPortStatus(text) {
+  document.getElementById("powerPortStatus").innerText = text;
+}
+
+function setIdPortStatus(text) {
+  document.getElementById("idPortStatus").innerText = text;
+}
+
 function updateLastIdDisplay() {
   document.getElementById("lastSeenId").innerText = latestIdData.id || "-";
   document.getElementById("lastSeenRssi").innerText = latestIdData.rssi || "-";
 }
-function setIdWindowStatus(text) { document.getElementById("idWindowStatus").innerText = text; }
+
+function setIdWindowStatus(text) {
+  document.getElementById("idWindowStatus").innerText = text;
+}
+
 function updateLastBarcodeLabel(text) {
   lastBarcodeLabel = text || "";
   document.getElementById("lastBarcodeLabel").innerText = lastBarcodeLabel || "-";
 }
+
 function getOverallCap(burstCount) {
-  for (const rule of OVERALL_CAP_RULES) if (burstCount > rule.burstMin) return rule.cap;
+  for (const rule of OVERALL_CAP_RULES) {
+    if (burstCount > rule.burstMin) return rule.cap;
+  }
   return 30;
 }
+
 function resetUiForNewTest() {
+  // IMPORTANT: clear serial at the start of every new test
+  document.getElementById("deviceSerial").value = "";
+
   chart.data.labels = [];
   chart.data.datasets[0].data = [];
   chart.data.datasets[0].backgroundColor = [];
   chart.update();
+
   document.getElementById("maxValue").innerText = 0;
   document.getElementById("sleepAvg").innerText = 0;
   document.getElementById("overallAvg").innerText = 0;
@@ -303,145 +233,73 @@ function resetUiForNewTest() {
   document.getElementById("manualButtons").style.display = "none";
   document.getElementById("peakMatchedId").innerText = "-";
   setIdWindowStatus("Idle");
+  updateLastBarcodeLabel("");
+
   lastTestData = null;
   idCaptureWindowActive = false;
   idCaptureWindowEnd = 0;
   idWindowEvents = [];
 }
-function generateDailyRoom() {
-  const rand = Math.random().toString(36).slice(2, 8).toUpperCase();
-  return `${PHONE_SESSION_PREFIX}-${PHONE_SESSION_DATE_FORMAT}-${rand}`;
-}
-function loadOrCreateDailyRoom() {
-  const saved = localStorage.getItem(PHONE_SESSION_STORAGE_KEY);
-  if (saved) {
-    try {
-      const obj = JSON.parse(saved);
-      if (obj.date === PHONE_SESSION_DATE_FORMAT && obj.room) return obj.room;
-    } catch (e) {}
-  }
-  const room = generateDailyRoom();
-  localStorage.setItem(PHONE_SESSION_STORAGE_KEY, JSON.stringify({ date: PHONE_SESSION_DATE_FORMAT, room }));
-  return room;
-}
-function forceNewDailyRoom() {
-  const room = generateDailyRoom();
-  localStorage.setItem(PHONE_SESSION_STORAGE_KEY, JSON.stringify({ date: PHONE_SESSION_DATE_FORMAT, room }));
-  return room;
-}
-function getPhoneLink() {
-  const url = new URL(SITE_BASE_URL);
-  url.searchParams.set("phoneMode", "1");
-  url.searchParams.set("room", syncRoom);
-  return url.toString();
-}
-function setSyncStatus(text) {
-  const el = document.getElementById("syncStatus");
-  if (el) el.innerText = text;
-}
-function updatePhoneSessionUi() {
-  const link = getPhoneLink();
-  [document.getElementById("phoneRoomDisplay"), document.getElementById("phoneWaitRoom"), document.getElementById("phoneModeRoom")]
-    .forEach(el => { if (el) el.innerText = syncRoom; });
-  [document.getElementById("phoneLinkDisplay"), document.getElementById("phoneWaitLink")]
-    .forEach(el => { if (el) el.innerText = link; });
-  const qrCanvas = document.getElementById("phoneQrCanvas");
-  if (qrCanvas) QRCode.toCanvas(qrCanvas, link, { width: 220 }, err => { if (err) console.error(err); });
-}
-async function copyPhoneLink() {
-  try { await navigator.clipboard.writeText(getPhoneLink()); alert("Phone link copied."); }
-  catch (e) { console.error(e); alert("Could not copy phone link."); }
-}
-function applyQueryMode() {
-  const params = new URLSearchParams(window.location.search);
-  const isPhoneMode = params.get("phoneMode") === "1";
-  const room = params.get("room");
-  if (room) syncRoom = room;
-  if (isPhoneMode) {
-    document.getElementById("pcApp").classList.add("hidden");
-    document.getElementById("loginCard").classList.add("hidden");
-    document.getElementById("phoneApp").classList.remove("hidden");
-    return true;
-  } else {
-    document.getElementById("pcApp").classList.remove("hidden");
-    document.getElementById("phoneApp").classList.add("hidden");
-    return false;
-  }
-}
-
-async function setupRealtimeSync() {
-  try {
-    const values = Object.values(firebaseConfig).filter(Boolean);
-    if (values.length !== 7) {
-      syncEnabled = false;
-      setSyncStatus("Phone sync off - fill Firebase config");
-      return;
-    }
-    const { initializeApp, getDatabase, ref, onValue } = window.__firebase;
-    const app = initializeApp(firebaseConfig);
-    db = getDatabase(app);
-    phoneBarcodeRef = ref(db, "sealProfilerRooms/" + syncRoom + "/latestBarcode");
-    onValue(phoneBarcodeRef, (snapshot) => {
-      const data = snapshot.val();
-      if (!data || !data.barcode || !data.ts) return;
-      lastPhoneScanSeen = data;
-      const lastScanEl = document.getElementById("phoneModeLastScan");
-      if (lastScanEl) lastScanEl.innerText = data.barcode;
-    });
-    syncEnabled = true;
-    setSyncStatus("Live sync connected");
-  } catch (e) {
-    console.error("Realtime sync setup failed:", e);
-    syncEnabled = false;
-    setSyncStatus("Sync error");
-  }
-}
-
-async function pushPhoneBarcode(barcode) {
-  if (!syncEnabled || !phoneBarcodeRef) {
-    alert("Phone sync not configured. Fill Firebase config first.");
-    return;
-  }
-  await window.__firebase.set(phoneBarcodeRef, { barcode, ts: Date.now(), sender: "phone" });
-}
 
 function parseIdLine(line) {
   const match = line.match(/RSSI:\s*(-?\d+)\s+ID:\s*([0-9A-Fa-f]+)/i);
   if (!match) return null;
-  const parsed = { rssi: parseInt(match[1], 10), id: match[2].toUpperCase(), timestamp: Date.now(), raw: line.trim() };
+
+  const parsed = {
+    rssi: parseInt(match[1], 10),
+    id: match[2].toUpperCase(),
+    timestamp: Date.now(),
+    raw: line.trim()
+  };
+
   if (ENABLE_RSSI_FILTER && parsed.rssi < RSSI_MIN_DBM) return null;
   return parsed;
 }
+
 function rememberIdEvent(obj) {
   latestIdData = obj;
   recentIdEvents.push(obj);
+
   const cutoff = Date.now() - ID_EVENT_HISTORY_MS;
   recentIdEvents = recentIdEvents.filter(e => e.timestamp >= cutoff);
+
   if (idCaptureWindowActive) idWindowEvents.push(obj);
+
   updateLastIdDisplay();
 }
+
 function getBestIdEvent(events) {
   if (!events || events.length === 0) return null;
+
   let best = events[0];
   for (let i = 1; i < events.length; i++) {
     const e = events[i];
-    if (e.rssi > best.rssi || (e.rssi === best.rssi && e.timestamp > best.timestamp)) best = e;
+    if (e.rssi > best.rssi || (e.rssi === best.rssi && e.timestamp > best.timestamp)) {
+      best = e;
+    }
   }
   return best;
 }
+
 function startIdCaptureWindow() {
   if (idCaptureWindowActive) return;
+
   const now = Date.now();
   const pastCutoff = now - ID_CAPTURE_PAST_MS;
+
   idCaptureWindowActive = true;
   idCaptureWindowEnd = now + ID_CAPTURE_FUTURE_MS;
   idWindowEvents = recentIdEvents.filter(e => e.timestamp >= pastCutoff);
+
   setIdWindowStatus(`Capturing: -${ID_CAPTURE_PAST_MS}ms / +${ID_CAPTURE_FUTURE_MS}ms`);
 }
+
 function finishIdCaptureWindow() {
   if (!idCaptureWindowActive) return;
+
   idCaptureWindowActive = false;
   idCaptureWindowEnd = 0;
+
   if (idWindowEvents.length > 0) {
     const picked = getBestIdEvent(idWindowEvents);
     document.getElementById("deviceSerial").value = picked.id;
@@ -450,6 +308,7 @@ function finishIdCaptureWindow() {
   } else {
     setIdWindowStatus("No ID seen around peak");
   }
+
   idWindowEvents = [];
 }
 
@@ -458,38 +317,52 @@ async function connectPowerPort() {
     powerPort = await navigator.serial.requestPort();
     await powerPort.open({ baudRate: POWER_PORT_BAUD });
     setPowerPortStatus(`Connected @ ${POWER_PORT_BAUD}`);
-  } catch (e) { console.error(e); alert("Power COM port not selected/opened."); }
+  } catch (e) {
+    console.error(e);
+    alert("Power COM port not selected/opened.");
+  }
 }
+
 async function connectIdPort() {
   try {
     idPort = await navigator.serial.requestPort();
     await idPort.open({ baudRate: ID_PORT_BAUD });
     setIdPortStatus(`Connected @ ${ID_PORT_BAUD}`);
     startIdReadLoop();
-  } catch (e) { console.error(e); alert("ID COM port not selected/opened."); }
+  } catch (e) {
+    console.error(e);
+    alert("ID COM port not selected/opened.");
+  }
 }
+
 async function startIdReadLoop() {
   if (!idPort || !idPort.readable || idReadLoopRunning) return;
+
   idReadLoopRunning = true;
   idReader = idPort.readable.getReader();
+
   try {
     while (true) {
       const { value, done } = await idReader.read();
       if (done) break;
       if (!value) continue;
+
       idBuffer += new TextDecoder().decode(value);
       const lines = idBuffer.split(/\r?\n/);
       idBuffer = lines.pop();
+
       for (const line of lines) {
         const parsed = parseIdLine(line);
         if (parsed) rememberIdEvent(parsed);
       }
     }
-  } catch (e) { console.error("ID port read loop error:", e); }
-  finally {
+  } catch (e) {
+    console.error("ID port read loop error:", e);
+  } finally {
     try { idReader.releaseLock(); } catch (e) {}
     idReader = null;
     idReadLoopRunning = false;
+
     if (idPort && idPort.readable) setIdPortStatus("Connected, reader stopped");
     else setIdPortStatus("Disconnected");
   }
@@ -498,23 +371,48 @@ async function startIdReadLoop() {
 const ctx = document.getElementById('adcChart').getContext('2d');
 const chart = new Chart(ctx, {
   type: 'line',
-  data: { labels: [], datasets: [{ label: 'Current (µA)', data: [], borderColor: 'red', backgroundColor: 'rgba(255,0,0,0.2)', fill: true }] },
-  options: { animation: false, responsive: true, scales: { y: { type: 'logarithmic', min: CHART_Y_MIN_UA, max: CHART_Y_MAX_UA, ticks: { callback: value => value + ' µA' } } } }
+  data: {
+    labels: [],
+    datasets: [{
+      label: 'Current (µA)',
+      data: [],
+      borderColor: 'red',
+      backgroundColor: 'rgba(255,0,0,0.2)',
+      fill: true
+    }]
+  },
+  options: {
+    animation: false,
+    responsive: true,
+    scales: {
+      y: {
+        type: 'logarithmic',
+        min: CHART_Y_MIN_UA,
+        max: CHART_Y_MAX_UA,
+        ticks: {
+          callback: value => value + ' µA'
+        }
+      }
+    }
+  }
 });
 
 document.getElementById("loginBtn").onclick = async () => {
   const password = document.getElementById("password").value;
   document.getElementById("loginStatus").innerText = "Logging in...";
+
   try {
     const res = await fetch(SERVER + "/api/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username: USERNAME, password })
     });
+
     if (!res.ok) {
       document.getElementById("loginStatus").innerText = "❌ Failed";
       return;
     }
+
     jwtToken = (await res.json()).token;
     document.getElementById("loginStatus").innerText = "✅ Logged in";
     document.getElementById("loginCard").style.display = "none";
@@ -524,26 +422,6 @@ document.getElementById("loginBtn").onclick = async () => {
   }
 };
 
-function askBarcodeMethodAfterPass() {
-  return new Promise((resolve) => {
-    const modal = document.getElementById("barcodeChoiceModal");
-    const choosePcBtn = document.getElementById("choosePcScannerBtn");
-    const choosePhoneBtn = document.getElementById("choosePhoneScannerBtn");
-    const cancelBtn = document.getElementById("barcodeChoiceCancelBtn");
-    const status = document.getElementById("barcodeChoiceStatus");
-    modal.style.display = "block";
-    status.innerText = syncEnabled ? "Phone scanner ready." : "Phone scanner unavailable until Firebase config is filled in.";
-    function cleanup() {
-      choosePcBtn.onclick = null; choosePhoneBtn.onclick = null; cancelBtn.onclick = null; modal.style.display = "none";
-    }
-    choosePcBtn.onclick = () => { cleanup(); resolve("pc"); };
-    choosePhoneBtn.onclick = () => {
-      if (!syncEnabled) { status.innerText = "Phone sync not configured yet. Use PC scanner or fill Firebase config."; return; }
-      cleanup(); resolve("phone");
-    };
-    cancelBtn.onclick = () => { cleanup(); resolve(null); };
-  });
-}
 function askForPcBarcode() {
   return new Promise((resolve) => {
     const modal = document.getElementById("barcodeModal");
@@ -551,143 +429,221 @@ function askForPcBarcode() {
     const saveBtn = document.getElementById("barcodeSaveBtn");
     const cancelBtn = document.getElementById("barcodeCancelBtn");
     const status = document.getElementById("barcodeStatus");
+
     modal.style.display = "block";
     input.value = "";
     status.innerText = "Waiting for barcode scan...";
     setTimeout(() => input.focus(), 100);
+
     function cleanup() {
-      saveBtn.onclick = null; cancelBtn.onclick = null; input.onkeydown = null; modal.style.display = "none";
+      saveBtn.onclick = null;
+      cancelBtn.onclick = null;
+      input.onkeydown = null;
+      modal.style.display = "none";
     }
+
     saveBtn.onclick = () => {
       const barcode = input.value.trim();
-      if (!barcode) { status.innerText = "Please scan or enter a barcode."; input.focus(); return; }
-      cleanup(); resolve(barcode);
-    };
-    cancelBtn.onclick = () => { cleanup(); resolve(null); };
-    input.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); saveBtn.click(); } };
-  });
-}
-function waitForPhoneBarcode() {
-  return new Promise((resolve) => {
-    const modal = document.getElementById("phoneWaitModal");
-    const cancelBtn = document.getElementById("phoneWaitCancelBtn");
-    const status = document.getElementById("phoneWaitStatus");
-    modal.style.display = "block";
-    updatePhoneSessionUi();
-    status.innerText = "Waiting for next phone scan...";
-    const startTs = Date.now();
-    const interval = setInterval(() => {
-      if (lastPhoneScanSeen && lastPhoneScanSeen.ts > startTs) {
-        cleanup(); resolve(lastPhoneScanSeen.barcode);
+      if (!barcode) {
+        status.innerText = "Please scan or enter a barcode.";
+        input.focus();
+        return;
       }
-    }, 250);
-    function cleanup() { clearInterval(interval); cancelBtn.onclick = null; modal.style.display = "none"; }
-    cancelBtn.onclick = () => { cleanup(); resolve(null); };
+      cleanup();
+      resolve(barcode);
+    };
+
+    cancelBtn.onclick = () => {
+      cleanup();
+      resolve(null);
+    };
+
+    input.onkeydown = (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        saveBtn.click();
+      }
+    };
   });
 }
 
 async function startTest() {
-  if (!jwtToken) { alert("Login first"); return; }
+  if (!jwtToken) {
+    alert("Login first");
+    return;
+  }
+
   resetUiForNewTest();
+
   if (!powerPort) await connectPowerPort();
-  if (!powerPort || !powerPort.readable) { alert("Connect the Power COM port first."); return; }
+  if (!powerPort || !powerPort.readable) {
+    alert("Connect the Power COM port first.");
+    return;
+  }
+
   if (!idPort) {
     const proceed = confirm("ID COM port is not connected. Continue without auto ID?");
     if (!proceed) return;
   } else if (!idReadLoopRunning) {
     startIdReadLoop();
   }
-  if (powerReader) { try { await powerReader.cancel(); } catch (e) {} powerReader = null; }
+
+  if (powerReader) {
+    try { await powerReader.cancel(); } catch (e) {}
+    powerReader = null;
+  }
+
   powerReader = powerPort.readable.getReader();
-  let maxBurst = 0, totalSum = 0, totalCount = 0, burstCount = 0;
+
+  let maxBurst = 0;
+  let totalSum = 0;
+  let totalCount = 0;
+  let burstCount = 0;
   const sleepWindow = [];
+
   try {
     let buffer = '';
     const start = Date.now();
+
     while (true) {
       const { value, done } = await powerReader.read();
       if (done) break;
+
       if (value) {
         buffer += new TextDecoder().decode(value);
         const lines = buffer.split(/\r?\n/);
         buffer = lines.pop();
+
         lines.forEach(line => {
           const match = line.match(/Current:\s*([\d.]+)/i);
           if (!match) return;
+
           const current = Math.max(parseFloat(match[1]) * 1000, MIN_CURRENT_UA);
+
           chart.data.labels.push('');
           chart.data.datasets[0].data.push(current);
           chart.data.datasets[0].backgroundColor.push(current >= BURST_THRESHOLD_UA ? 'gold' : 'red');
+
           if (chart.data.labels.length > CHART_MAX_POINTS) {
-            chart.data.labels.shift(); chart.data.datasets[0].data.shift(); chart.data.datasets[0].backgroundColor.shift();
+            chart.data.labels.shift();
+            chart.data.datasets[0].data.shift();
+            chart.data.datasets[0].backgroundColor.shift();
           }
+
           chart.update();
+
           if (current > maxBurst) maxBurst = current;
-          if (current >= BURST_THRESHOLD_UA) { burstCount++; if (!idCaptureWindowActive) startIdCaptureWindow(); }
+
+          if (current >= BURST_THRESHOLD_UA) {
+            burstCount++;
+            if (!idCaptureWindowActive) startIdCaptureWindow();
+          }
+
           document.getElementById("burstCount").innerText = burstCount;
+
           if (current <= SLEEP_THRESHOLD_UA) {
             sleepWindow.push(current);
             if (sleepWindow.length > SLEEP_WINDOW_SIZE) sleepWindow.shift();
-            const sleepAvgLive = sleepWindow.reduce((a,b)=>a+b,0) / sleepWindow.length;
+
+            const sleepAvgLive = sleepWindow.reduce((a, b) => a + b, 0) / sleepWindow.length;
             document.getElementById("sleepAvg").innerText = Math.round(sleepAvgLive);
           }
+
           totalSum += current;
           totalCount++;
+
           document.getElementById("overallAvg").innerText = Math.round(totalSum / totalCount);
           document.getElementById("maxValue").innerText = Math.round(maxBurst);
         });
       }
-      if (idCaptureWindowActive && Date.now() >= idCaptureWindowEnd) finishIdCaptureWindow();
+
+      if (idCaptureWindowActive && Date.now() >= idCaptureWindowEnd) {
+        finishIdCaptureWindow();
+      }
+
       if (Date.now() - start >= TEST_DURATION_MS) {
         if (idCaptureWindowActive) finishIdCaptureWindow();
-        const sleepAvg = sleepWindow.length ? sleepWindow.reduce((a,b)=>a+b,0) / sleepWindow.length : 0;
+
+        const sleepAvg = sleepWindow.length ? sleepWindow.reduce((a, b) => a + b, 0) / sleepWindow.length : 0;
         const overallAvg = totalCount ? totalSum / totalCount : 0;
+
         let serial = document.getElementById("deviceSerial").value.trim();
         if (!serial && latestIdData.id) {
           serial = latestIdData.id;
           document.getElementById("deviceSerial").value = serial;
         }
+
         if (!serial) {
           alert("No serial ID detected from ID COM port and no manual serial entered.");
           document.getElementById("testResult").innerText = "FAIL [No serial ID detected]";
           break;
         }
+
         const overallCap = getOverallCap(burstCount);
         const passSleep = sleepAvg < SLEEP_THRESHOLD_UA;
         const passBurst = maxBurst > BURST_THRESHOLD_UA;
         const passOverall = overallAvg <= overallCap;
+
         let reasons = [];
         if (!passSleep) reasons.push(`Sleep Avg > ${SLEEP_THRESHOLD_UA} µA`);
         if (!passBurst) reasons.push(`Burst < ${BURST_THRESHOLD_UA} µA`);
         if (!passOverall) reasons.push(`Overall Avg > ${overallCap} µA`);
+
         const finalResult = (passSleep && passBurst && passOverall) ? "PASS" : "FAIL";
-        document.getElementById("testResult").innerText = finalResult + (reasons.length ? " [" + reasons.join(", ") + "]" : "");
-        lastTestData = { serial, sleepAvg, burstCount, maxBurst, overallAvg, finalResult, reasons: reasons.join(";") };
+        document.getElementById("testResult").innerText =
+          finalResult + (reasons.length ? " [" + reasons.join(", ") + "]" : "");
+
+        lastTestData = {
+          serial,
+          sleepAvg,
+          burstCount,
+          maxBurst,
+          overallAvg,
+          finalResult,
+          reasons: reasons.join(";")
+        };
+
         if (finalResult === "FAIL") {
           document.getElementById("manualButtons").style.display = "block";
         } else {
-          const method = await askBarcodeMethodAfterPass();
-          if (!method) { alert("Barcode step cancelled. PASS result not sent."); break; }
-          let barcodeLabel = null;
-          if (method === "pc") barcodeLabel = await askForPcBarcode();
-          else if (method === "phone") barcodeLabel = await waitForPhoneBarcode();
-          if (!barcodeLabel) { alert("Barcode scan cancelled. PASS result not sent."); break; }
+          const barcodeLabel = await askForPcBarcode();
+
+          if (!barcodeLabel) {
+            alert("Barcode scan cancelled. PASS result not sent.");
+            break;
+          }
+
           updateLastBarcodeLabel(barcodeLabel);
+
           try {
-            await sendToThingsBoard(serial, barcodeLabel, sleepAvg, burstCount, maxBurst, overallAvg, finalResult, reasons.join(";"));
+            await sendToThingsBoard(
+              serial,
+              barcodeLabel,
+              sleepAvg,
+              burstCount,
+              maxBurst,
+              overallAvg,
+              finalResult,
+              reasons.join(";")
+            );
+
             addHistory(serial, barcodeLabel, sleepAvg, burstCount, maxBurst, overallAvg, finalResult);
             clearSerialOnly();
           } catch (e) {
-            console.error(e); alert("❌ Send to ThingsBoard failed. Test history not saved.");
+            console.error(e);
+            alert("❌ Send to ThingsBoard failed. Test history not saved.");
           }
         }
+
         break;
       }
     }
+
     try { powerReader.releaseLock(); } catch (e) {}
     powerReader = null;
   } catch (e) {
-    console.error(e); alert("Error: " + e);
+    console.error(e);
+    alert("Error: " + e);
     try { powerReader.releaseLock(); } catch (x) {}
     powerReader = null;
   }
@@ -696,17 +652,29 @@ async function startTest() {
 async function sendToThingsBoard(serial, barcodeLabel, sleepAvg, burstCount, peak, avg, result, reason) {
   const deviceBody = { name: serial, type: "BLE Device" };
   if (barcodeLabel) deviceBody.label = barcodeLabel;
+
   const deviceRes = await fetch(SERVER + "/api/device", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "X-Authorization": "Bearer " + jwtToken },
+    headers: {
+      "Content-Type": "application/json",
+      "X-Authorization": "Bearer " + jwtToken
+    },
     body: JSON.stringify(deviceBody)
   });
+
   if (!deviceRes.ok) throw new Error("Device creation failed");
+
   const device = await deviceRes.json();
   const deviceId = device.id.id;
-  const credRes = await fetch(SERVER + "/api/device/" + deviceId + "/credentials", { headers: { "X-Authorization": "Bearer " + jwtToken } });
+
+  const credRes = await fetch(SERVER + "/api/device/" + deviceId + "/credentials", {
+    headers: { "X-Authorization": "Bearer " + jwtToken }
+  });
+
   if (!credRes.ok) throw new Error("Get credentials failed");
+
   const cred = await credRes.json();
+
   const telemetryRes = await fetch(SERVER + "/api/v1/" + cred.credentialsId + "/telemetry", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -722,6 +690,7 @@ async function sendToThingsBoard(serial, barcodeLabel, sleepAvg, burstCount, pea
       test_time: Date.now()
     })
   });
+
   if (!telemetryRes.ok) throw new Error("Send telemetry failed");
 }
 
@@ -739,83 +708,34 @@ function addHistory(serial, barcodeLabel, sleepAvg, burstCount, peak, avg, resul
   document.getElementById("history").appendChild(tr);
 }
 
-async function startPhoneCameraScanner() {
-  if (html5QrScanner) return;
-  const formatsToSupport = [
-    Html5QrcodeSupportedFormats.CODE_128,
-    Html5QrcodeSupportedFormats.CODE_39,
-    Html5QrcodeSupportedFormats.CODE_93,
-    Html5QrcodeSupportedFormats.EAN_13,
-    Html5QrcodeSupportedFormats.EAN_8,
-    Html5QrcodeSupportedFormats.UPC_A,
-    Html5QrcodeSupportedFormats.UPC_E,
-    Html5QrcodeSupportedFormats.QR_CODE
-  ];
-  html5QrScanner = new Html5Qrcode("phoneReader");
-  try {
-    await html5QrScanner.start(
-      { facingMode: "environment" },
-      { fps: 10, qrbox: { width: 280, height: 180 }, formatsToSupport },
-      async (decodedText) => {
-        const clean = (decodedText || "").trim();
-        if (!clean) return;
-        document.getElementById("phoneModeLastScan").innerText = clean;
-        document.getElementById("phoneModeStatus").innerText = "Sending...";
-        await pushPhoneBarcode(clean);
-        document.getElementById("phoneModeStatus").innerText = "Scan sent";
-      },
-      () => {}
-    );
-    document.getElementById("phoneModeStatus").innerText = "Scanner active";
-  } catch (e) {
-    console.error("Phone scanner start failed:", e);
-    document.getElementById("phoneModeStatus").innerText = "Scanner failed";
-    alert("Could not start phone camera scanner.");
-    html5QrScanner = null;
-  }
-}
-async function stopPhoneCameraScanner() {
-  if (!html5QrScanner) return;
-  try { await html5QrScanner.stop(); await html5QrScanner.clear(); } catch (e) { console.error("Phone scanner stop failed:", e); }
-  html5QrScanner = null;
-  document.getElementById("phoneModeStatus").innerText = "Stopped";
-}
-
 document.getElementById("connectPowerPortBtn").onclick = connectPowerPort;
 document.getElementById("connectIdPortBtn").onclick = connectIdPort;
 document.getElementById("connect").onclick = startTest;
 document.getElementById("retryBtn").onclick = () => { startTest(); };
+
 document.getElementById("sendFailBtn").onclick = async () => {
   if (lastTestData) {
     const d = lastTestData;
     try {
-      await sendToThingsBoard(d.serial, "", d.sleepAvg, d.burstCount, d.maxBurst, d.overallAvg, d.finalResult, d.reasons);
+      await sendToThingsBoard(
+        d.serial,
+        "",
+        d.sleepAvg,
+        d.burstCount,
+        d.maxBurst,
+        d.overallAvg,
+        d.finalResult,
+        d.reasons
+      );
       addHistory(d.serial, "", d.sleepAvg, d.burstCount, d.maxBurst, d.overallAvg, d.finalResult);
       clearSerialOnly();
       document.getElementById("manualButtons").style.display = "none";
-    } catch (e) { console.error(e); alert("❌ Send to ThingsBoard failed. Test history not saved."); }
+    } catch (e) {
+      console.error(e);
+      alert("❌ Send to ThingsBoard failed. Test history not saved.");
+    }
   }
 };
-document.getElementById("copyPhoneLinkBtn").onclick = copyPhoneLink;
-document.getElementById("regenPhoneRoomBtn").onclick = async () => {
-  syncRoom = forceNewDailyRoom();
-  updatePhoneSessionUi();
-  await setupRealtimeSync();
-  alert("New day session created.");
-};
-const startPhoneScannerBtn = document.getElementById("startPhoneScannerBtn");
-if (startPhoneScannerBtn) startPhoneScannerBtn.onclick = startPhoneCameraScanner;
-const stopPhoneScannerBtn = document.getElementById("stopPhoneScannerBtn");
-if (stopPhoneScannerBtn) stopPhoneScannerBtn.onclick = stopPhoneCameraScanner;
-
-(async function init() {
-  const isPhoneMode = applyQueryMode();
-  if (!syncRoom) syncRoom = loadOrCreateDailyRoom();
-  updatePhoneSessionUi();
-  await setupRealtimeSync();
-  if (isPhoneMode) document.getElementById("phoneModeRoom").innerText = syncRoom;
-})();
-window.addEventListener("beforeunload", () => { stopPhoneCameraScanner(); });
 </script>
 </body>
 </html>
