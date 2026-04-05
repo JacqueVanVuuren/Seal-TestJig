@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <title>BLE Automated Power Test + ThingsBoard</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
 // AUTO START VOICE ON LOAD
 window.addEventListener("load", async () => {
   try {
@@ -203,7 +204,9 @@ label { display:inline-block; width:240px; vertical-align:top; }
         <div>ID Port: <span id="idPortStatus">Not connected</span></div>
         <div>Last ID Seen: <span id="lastSeenId">-</span></div>
         <div>Last RSSI Seen: <span id="lastSeenRssi">-</span></div>
+        <div>Last ID Time: <span id="lastSeenTime">-</span></div>
         <div>Peak-Matched ID: <span id="peakMatchedId">-</span></div>
+        <div>Peak Match Time: <span id="peakMatchedTime">-</span></div>
         <div>ID Window: <span id="idWindowStatus">Idle</span></div>
         <div>Overall Cap In Use: <span id="overallCapStatus">-</span></div>
         <div>Last Barcode Label: <span id="lastBarcodeLabel">-</span></div>
@@ -220,6 +223,17 @@ label { display:inline-block; width:240px; vertical-align:top; }
       <div class="statusBox" style="flex:1.5; min-width:320px;">
         <div>Programming Log</div>
         <textarea id="programLog" readonly style="min-height:160px; resize:vertical; width:100%; background:#000; color:#fff; border:1px solid #334155; font-family:monospace;"></textarea>
+      </div>
+
+      <div class="statusBox" style="flex:1.5; min-width:360px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+          <div>BLE Event Log</div>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <button id="downloadBleLogBtn" class="secondary" style="padding:6px 10px; margin:0;">Download Log</button>
+            <button id="clearBleLogBtn" class="secondary" style="padding:6px 10px; margin:0;">Clear Log</button>
+          </div>
+        </div>
+        <textarea id="bleEventLog" readonly style="min-height:160px; resize:vertical; width:100%; background:#000; color:#7CFC00; border:1px solid #334155; font-family:monospace;"></textarea>
       </div>
     </div>
 
@@ -468,6 +482,7 @@ let activeOverallCap = 0;
 let espLineBuffer = "";
 let testStopRequested = false;
 let programmingLogLines = [];
+let bleEventLogLines = [];
 let selectedFirmwareFile = null;
 let selectedFirmwareName = "";
 let voiceRecognition = null;
@@ -544,14 +559,76 @@ function appendProgrammingLog(line) {
       clean.includes("BreakError: Break received")) {
     return;
   }
+
+  const MAX_PROGRAM_LOG_STORE = 500;
+  const MAX_PROGRAM_LOG_DISPLAY = 50;
+
   programmingLogLines.push(clean);
-  if (programmingLogLines.length > 200) {
-    programmingLogLines = programmingLogLines.slice(-200);
+  if (programmingLogLines.length > MAX_PROGRAM_LOG_STORE) {
+    programmingLogLines = programmingLogLines.slice(-MAX_PROGRAM_LOG_STORE);
   }
+
   const area = document.getElementById("programLog");
-  area.value = programmingLogLines.join("\n");
+  area.value = programmingLogLines.slice(-MAX_PROGRAM_LOG_DISPLAY).join("\n");
   area.scrollTop = area.scrollHeight;
   setProgrammerDetail(clean);
+}
+
+function clearBleEventLog() {
+  bleEventLogLines = [];
+  const area = document.getElementById("bleEventLog");
+  if (area) area.value = "";
+}
+
+function appendBleEventLog(line) {
+  const clean = String(line || "").trim();
+  if (!clean) return;
+
+  const MAX_BLE_LOG_STORE = 500;
+  const MAX_BLE_LOG_DISPLAY = 50;
+
+  bleEventLogLines.push(clean);
+  if (bleEventLogLines.length > MAX_BLE_LOG_STORE) {
+    bleEventLogLines = bleEventLogLines.slice(-MAX_BLE_LOG_STORE);
+  }
+  const area = document.getElementById("bleEventLog");
+  if (area) {
+    area.value = bleEventLogLines.slice(-MAX_BLE_LOG_DISPLAY).join("\n");
+    area.scrollTop = area.scrollHeight;
+  }
+}
+
+function downloadBleEventLog() {
+  const logLines = bleEventLogLines.length ? bleEventLogLines : ["BLE log is empty."];
+  const serialField = (document.getElementById("deviceSerial")?.value || "").trim().toLowerCase();
+  const safeSerial = serialField ? serialField.replace(/[^a-z0-9_-]+/gi, "_") : "no_serial";
+
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const stamp = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  const filename = `ble_event_log_${safeSerial}_${stamp}.txt`;
+
+  const header = [
+    `Generated: ${now.toISOString()}`,
+    `Device Serial Field: ${serialField || "-"}`,
+    `Last Seen ID: ${document.getElementById("lastSeenId")?.innerText || "-"}`,
+    `Last Seen RSSI: ${document.getElementById("lastSeenRssi")?.innerText || "-"}`,
+    `Peak Matched ID: ${document.getElementById("peakMatchedId")?.innerText || "-"}`,
+    `ID Window Status: ${document.getElementById("idWindowStatus")?.innerText || "-"}`,
+    "",
+    "BLE EVENT LOG",
+    "============="
+  ].join("\n");
+
+  const blob = new Blob([header + "\n" + logLines.join("\n") + "\n"], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 let aiVoiceAudio = null;
@@ -718,7 +795,7 @@ function speakTestResult(result, reasonsText) {
       spoken.push(reason);
 
       if (/No B L E ID detected/i.test(reason)) {
-        spoken.push(". Ensure the tag is placed close to the jig, and confirm that the RSSI threshold in the configuration page is not set too low.");
+        spoken.push("No BLE ID was detected in the time window. Ensure the tag is placed close to the jig, and confirm that the RSSI threshold in the configuration page is not set too low.");
       } else if (/Sleep Avg\s*>|Overall Avg\s*>/i.test(reason)) {
         spoken.push("The device failed due to exceeding the current threshold. Ensure the threshold values are correctly configured on the configuration page.");
       } else if (/Burst\s*</i.test(reason)) {
@@ -1307,10 +1384,17 @@ function setIdPortStatus(text) {
   document.getElementById("idPortStatus").innerText = text;
 }
 
+function formatEventTime(ts) {
+  if (!ts) return "-";
+  const d = new Date(ts);
+  return d.toLocaleTimeString([], { hour12: false }) + "." + String(d.getMilliseconds()).padStart(3, "0");
+}
+
 function updateLastIdDisplay() {
   cleanupExpiredIdEvents(false);
   document.getElementById("lastSeenId").innerText = latestIdData.id || "-";
   document.getElementById("lastSeenRssi").innerText = latestIdData.rssi !== "" ? latestIdData.rssi : "-";
+  document.getElementById("lastSeenTime").innerText = formatEventTime(latestIdData.timestamp || 0);
 }
 
 function setIdWindowStatus(text) {
@@ -1345,6 +1429,7 @@ function cleanupExpiredIdEvents(updateUi = true) {
   if (updateUi) {
     document.getElementById("lastSeenId").innerText = latestIdData.id || "-";
     document.getElementById("lastSeenRssi").innerText = latestIdData.rssi !== "" ? latestIdData.rssi : "-";
+    document.getElementById("lastSeenTime").innerText = formatEventTime(latestIdData.timestamp || 0);
   }
 }
 
@@ -1363,11 +1448,13 @@ function resetUiForNewTest() {
   document.getElementById("manualButtons").style.display = "none";
   document.getElementById("sendFailBtn").disabled = true;
   document.getElementById("peakMatchedId").innerText = "-";
+  document.getElementById("peakMatchedTime").innerText = "-";
   setIdWindowStatus("Idle");
   setOverallCapStatus("-");
   setProgrammerStatus("Idle");
   setProgrammerDetail("-");
   updateLastBarcodeLabel("");
+  clearBleEventLog();
 
   lastTestData = null;
   idCaptureWindowActive = false;
@@ -1382,14 +1469,14 @@ function resetUiForNewTest() {
   updateLastIdDisplay();
 }
 
-function parseIdLine(line) {
+function parseIdLine(line, receivedAtMs = Date.now()) {
   const match = line.match(/RSSI:\s*(-?\d+)\s+ID:\s*([0-9A-Fa-f]+)/i);
   if (!match) return null;
 
   const parsed = {
     rssi: parseInt(match[1], 10),
     id: match[2].toUpperCase(),
-    timestamp: Date.now(),
+    timestamp: receivedAtMs,
     raw: line.trim()
   };
 
@@ -1401,6 +1488,8 @@ function rememberIdEvent(obj) {
   latestIdData = obj;
   recentIdEvents.push(obj);
   cleanupExpiredIdEvents(false);
+
+  appendBleEventLog(`[SEEN ${formatEventTime(obj.timestamp)}] RSSI:${obj.rssi} ID:${obj.id}${idCaptureWindowActive ? " [IN WINDOW]" : ""}`);
 
   if (idCaptureWindowActive) {
     idWindowEvents.push(obj);
@@ -1426,14 +1515,15 @@ function startIdCaptureWindow() {
   if (idCaptureWindowActive) return;
 
   const now = Date.now();
-  const idPastWindowMs = Math.max(settings.ID_CAPTURE_PAST_MS, settings.ID_EVENT_HISTORY_MS);
+  const idPastWindowMs = Math.max(0, Number(settings.ID_CAPTURE_PAST_MS || 0));
   const pastCutoff = now - idPastWindowMs;
 
   idCaptureWindowActive = true;
-  idCaptureWindowEnd = now + settings.ID_CAPTURE_FUTURE_MS;
+  idCaptureWindowEnd = now + Math.max(0, Number(settings.ID_CAPTURE_FUTURE_MS || 0));
   idWindowEvents = recentIdEvents.filter(e => e.timestamp >= pastCutoff);
 
-  setIdWindowStatus(`Capturing: -${idPastWindowMs}ms / +${settings.ID_CAPTURE_FUTURE_MS}ms`);
+  appendBleEventLog(`[WINDOW START ${formatEventTime(now)}] Past:${idPastWindowMs}ms Future:${Math.max(0, Number(settings.ID_CAPTURE_FUTURE_MS || 0))}ms Preloaded:${idWindowEvents.length}`);
+  setIdWindowStatus(`Capturing: -${idPastWindowMs}ms / +${Math.max(0, Number(settings.ID_CAPTURE_FUTURE_MS || 0))}ms`);
 }
 
 function finishIdCaptureWindow() {
@@ -1447,11 +1537,20 @@ function finishIdCaptureWindow() {
     activeTestCapturedId = picked.id.toLowerCase();
     document.getElementById("deviceSerial").value = picked.id.toLowerCase();
     document.getElementById("peakMatchedId").innerText = picked.id.toLowerCase();
-    setIdWindowStatus(`Captured: ${picked.id.toLowerCase()} (RSSI ${picked.rssi})`);
+    document.getElementById("peakMatchedTime").innerText = formatEventTime(picked.timestamp);
+    const windowEndNow = Date.now();
+    appendBleEventLog(`[WINDOW END ${formatEventTime(windowEndNow)}] Candidates:${idWindowEvents.length}`);
+    for (const evt of idWindowEvents) {
+      appendBleEventLog(`  [CANDIDATE ${formatEventTime(evt.timestamp)} | AGE ${windowEndNow - evt.timestamp}ms] RSSI:${evt.rssi} ID:${evt.id}`);
+    }
+    appendBleEventLog(`[CAPTURED ${formatEventTime(picked.timestamp)}] RSSI:${picked.rssi} ID:${picked.id}`);
+    setIdWindowStatus(`Captured: ${picked.id.toLowerCase()} (RSSI ${picked.rssi}, ${formatEventTime(picked.timestamp)})`);
   } else {
     activeTestCapturedId = "";
     document.getElementById("deviceSerial").value = "";
     document.getElementById("peakMatchedId").innerText = "-";
+    document.getElementById("peakMatchedTime").innerText = "-";
+    appendBleEventLog(`[WINDOW END ${formatEventTime(Date.now())}] No BLE ID detected in capture window`);
     setIdWindowStatus("No B L E ID detected in capture window");
   }
 
@@ -1514,12 +1613,13 @@ async function startIdReadLoop() {
       if (done) break;
       if (!value) continue;
 
+      const receivedAtMs = Date.now();
       idBuffer += new TextDecoder().decode(value);
       const lines = idBuffer.split(/\r?\n/);
       idBuffer = lines.pop();
 
       for (const line of lines) {
-        const parsed = parseIdLine(line);
+        const parsed = parseIdLine(line, receivedAtMs);
         if (parsed) rememberIdEvent(parsed);
       }
     }
@@ -2077,6 +2177,7 @@ async function startTest() {
   let totalSum = 0;
   let totalCount = 0;
   let burstCount = 0;
+  let wasAboveBurstThreshold = false;
   const sleepWindow = [];
 
   try {
@@ -2128,9 +2229,16 @@ async function startTest() {
           if (current > maxBurst) maxBurst = current;
 
           if (current >= settings.BURST_THRESHOLD_UA) {
-            burstCount++;
-            activeTestHadPeak = true;
-            if (!idCaptureWindowActive) startIdCaptureWindow();
+            if (!wasAboveBurstThreshold) {
+              const peakTs = Date.now();
+              burstCount++;
+              activeTestHadPeak = true;
+              appendBleEventLog(`[PEAK ${formatEventTime(peakTs)}] Current:${Math.round(current)}uA Threshold:${Math.round(settings.BURST_THRESHOLD_UA)}uA BurstCount:${burstCount}`);
+              if (!idCaptureWindowActive && !activeTestCapturedId) startIdCaptureWindow();
+            }
+            wasAboveBurstThreshold = true;
+          } else {
+            wasAboveBurstThreshold = false;
           }
 
           document.getElementById("burstCount").innerText = burstCount;
@@ -2406,8 +2514,16 @@ document.getElementById("loadFirmwareBtn").onclick = async () => {
 document.getElementById("connect").onclick = startTest;
 document.getElementById("stopEspBtn").onclick = stopEspTest;
 document.getElementById("voiceCmdBtn").onclick = startVoiceCommands;
-window.addEventListener("load", () => { startVoiceCommands(); });
 document.getElementById("retryBtn").onclick = () => { startTest(); };
+
+window.addEventListener("DOMContentLoaded", () => {
+  const downloadBtn = document.getElementById("downloadBleLogBtn");
+  const clearBtn = document.getElementById("clearBleLogBtn");
+  if (downloadBtn) downloadBtn.onclick = downloadBleEventLog;
+  if (clearBtn) clearBtn.onclick = clearBleEventLog;
+});
+
+window.addEventListener("load", () => { startVoiceCommands(); });
 
 document.getElementById("sendFailBtn").onclick = async () => {
   if (lastTestData) {
