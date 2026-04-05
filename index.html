@@ -267,7 +267,7 @@ label { display:inline-block; width:240px; vertical-align:top; }
 <div id="barcodeModal" class="modal">
   <div class="modal-content">
     <h3>Scan Barcode</h3>
-    <p>Test passed. Please scan the board barcode now.</p>
+    <p>Please scan the board barcode before the test starts.</p>
     <input id="barcodeInput" type="text" placeholder="Scan barcode here">
     <br>
     <button id="barcodeSaveBtn">Save Barcode</button>
@@ -2147,8 +2147,15 @@ async function startTest() {
     return;
   }
 
+  const barcodeLabel = await askForPcBarcode();
+  if (!barcodeLabel) {
+    alert("Barcode scan cancelled. Test not started.");
+    return;
+  }
+
   resetUiForNewTest();
   testStopRequested = false;
+  updateLastBarcodeLabel(barcodeLabel);
 
   if (!powerPort) await connectPowerPort();
   if (!powerPort || !powerPort.readable || !powerPort.writable) {
@@ -2300,6 +2307,7 @@ async function startTest() {
 
         lastTestData = {
           serial,
+          barcodeLabel,
           sleepAvg,
           burstCount,
           maxBurst,
@@ -2313,15 +2321,6 @@ async function startTest() {
           document.getElementById("manualButtons").style.display = "block";
           document.getElementById("sendFailBtn").disabled = !serial;
         } else {
-          const barcodeLabel = await askForPcBarcode();
-
-          if (!barcodeLabel) {
-            alert("Barcode scan cancelled. PASS result not sent.");
-            break;
-          }
-
-          updateLastBarcodeLabel(barcodeLabel);
-
           try {
             await sendToThingsBoard(
               serial,
@@ -2535,7 +2534,7 @@ document.getElementById("sendFailBtn").onclick = async () => {
     try {
       await sendToThingsBoard(
         d.serial,
-        "",
+        d.barcodeLabel || lastBarcodeLabel || "",
         d.sleepAvg,
         d.burstCount,
         d.maxBurst,
@@ -2543,7 +2542,7 @@ document.getElementById("sendFailBtn").onclick = async () => {
         d.finalResult,
         d.reasons
       );
-      addHistory(d.serial, "", d.sleepAvg, d.burstCount, d.maxBurst, d.overallAvg, d.finalResult);
+      addHistory(d.serial, d.barcodeLabel || lastBarcodeLabel || "", d.sleepAvg, d.burstCount, d.maxBurst, d.overallAvg, d.finalResult);
       clearSerialOnly();
       document.getElementById("manualButtons").style.display = "none";
     } catch (e) {
