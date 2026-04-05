@@ -59,7 +59,7 @@ label { display:inline-block; width:180px; }
 </head>
 <body>
 
-<h2>SEAL PROFILER   DMAN@IOTI</h2>
+<h2>SEAL PROFILER DMAN@IOTI</h2>
 
 <div class="card" id="loginCard">
   <input id="password" type="password" placeholder="ThingsBoard Password">
@@ -112,6 +112,7 @@ label { display:inline-block; width:180px; }
       <div>RSSI Filter: <span id="cfgRssiFilter">Off</span></div>
       <div>RSSI Min: <span id="cfgRssiMin">-70</span> dBm</div>
       <div>Chart Y Range: <span id="cfgChartRange">1 to 25000</span> µA</div>
+      <div>Overall Cap Rules: <span id="cfgOverallRules">45→150, 40→140, 35→130, 30→120, 25→110, 20→100, 0→90</span></div>
     </div>
   </div>
 
@@ -212,6 +213,19 @@ label { display:inline-block; width:180px; }
           <input id="cfg_chart_y_max_ua" type="number" min="1" step="1">
         </div>
       </div>
+
+      <div style="margin-top:14px;">
+        <label for="cfg_overall_cap_rules" style="display:block; width:auto; margin-bottom:6px;">Overall Cap Rules by Burst Count</label>
+        <textarea id="cfg_overall_cap_rules" rows="8" style="width:100%; box-sizing:border-box; border:none; border-radius:8px; padding:10px; font-family:monospace; background:#0f172a; color:#e2e8f0;">45=150
+40=140
+35=130
+30=120
+25=110
+20=100
+0=90</textarea>
+        <div class="config-note">One rule per line in the format burstCount=overallCap. Example: 20=100 means if burst count is greater than 20, overall average must be 100 µA or less.</div>
+      </div>
+
       <div class="config-note">These settings are saved on this PC in the browser and will still be there after a restart unless browser data is cleared.</div>
       <div class="config-actions">
         <button id="configSaveBtn" class="success">Save Settings</button>
@@ -234,7 +248,16 @@ const ID_PORT_BAUD = 115200;
 
 // -------- Persistent configuration --------
 const CONFIG_PASSWORD = "12345";
-const SETTINGS_STORAGE_KEY = "blePowerTestSettings_v1";
+const SETTINGS_STORAGE_KEY = "blePowerTestSettings_v2";
+const DEFAULT_OVERALL_CAP_RULES = [
+  { burstMin: 45, cap: 150 },
+  { burstMin: 40, cap: 140 },
+  { burstMin: 35, cap: 130 },
+  { burstMin: 30, cap: 120 },
+  { burstMin: 25, cap: 110 },
+  { burstMin: 20, cap: 100 },
+  { burstMin: -1, cap: 90 }
+];
 const DEFAULT_SETTINGS = {
   testDurationMs: 15000,
   idCapturePastMs: 400,
@@ -248,21 +271,11 @@ const DEFAULT_SETTINGS = {
   chartMaxPoints: 2000,
   chartYMinUa: 1,
   chartYMaxUa: 25000,
-  sleepWindowSize: 20
+  sleepWindowSize: 20,
+  overallCapRules: DEFAULT_OVERALL_CAP_RULES
 };
 
 let settings = loadSettings();
-
-// -------- Overall average caps by burst count --------
-const OVERALL_CAP_RULES = [
-  { burstMin: 45, cap: 150 },
-  { burstMin: 40, cap: 140 },
-  { burstMin: 35, cap: 130 },
-  { burstMin: 30, cap: 120 },
-  { burstMin: 25, cap: 110 },
-  { burstMin: 20, cap: 100 },
-  { burstMin: -1, cap: 90 }
-];
 
 let jwtToken = null;
 let powerPort = null;
@@ -279,6 +292,66 @@ let idCaptureWindowActive = false;
 let idCaptureWindowEnd = 0;
 let idWindowEvents = [];
 let matchedIdThisTest = null;
+
+function formatOverallCapRules(rules) {
+  return (rules || []).map(rule => `${rule.burstMin < 0 ? 0 : rule.burstMin}→${rule.cap}`).join(", ");
+}
+
+function rulesToTextarea(rules) {
+  return (rules || []).map(rule => `${rule.burstMin < 0 ? 0 : rule.burstMin}=${rule.cap}`).join("\n");
+}
+
+function parseOverallCapRules(text) {
+  if (Array.isArray(text)) {
+    const normalized = text
+      .map(rule => ({ burstMin: Number(rule.burstMin), cap: Number(rule.cap) }))
+      .filter(rule => Number.isFinite(rule.burstMin) && Number.isFinite(rule.cap))
+      .map(rule => ({ burstMin: rule.burstMin <= 0 ? -1 : rule.burstMin, cap: rule.cap }))
+      .sort((a, b) => b.burstMin - a.burstMin);
+
+    if (normalized.length) {
+      if (!normalized.some(rule => rule.burstMin < 0)) {
+        normalized.push({ burstMin: -1, cap: DEFAULT_OVERALL_CAP_RULES[DEFAULT_OVERALL_CAP_RULES.length - 1].cap });
+      }
+      normalized.sort((a, b) => b.burstMin - a.burstMin);
+      return normalized;
+    }
+  }
+
+  const lines = String(text || "").split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  const rules = [];
+
+  for (const line of lines) {
+    const match = line.match(/^(-?\d+(?:\.\d+)?)\s*(?:=|:|,|->|=>)\s*(-?\d+(?:\.\d+)?)$/);
+    if (!match) continue;
+
+    let burstMin = Number(match[1]);
+    const cap = Number(match[2]);
+    if (!Number.isFinite(burstMin) || !Number.isFinite(cap)) continue;
+
+    if (burstMin <= 0) burstMin = -1;
+    rules.push({ burstMin, cap });
+  }
+
+  if (!rules.length) return DEFAULT_OVERALL_CAP_RULES.map(r => ({ ...r }));
+
+  rules.sort((a, b) => b.burstMin - a.burstMin);
+
+  const deduped = [];
+  const seen = new Set();
+  for (const rule of rules) {
+    if (seen.has(rule.burstMin)) continue;
+    deduped.push(rule);
+    seen.add(rule.burstMin);
+  }
+
+  if (!deduped.some(rule => rule.burstMin < 0)) {
+    deduped.push({ burstMin: -1, cap: DEFAULT_OVERALL_CAP_RULES[DEFAULT_OVERALL_CAP_RULES.length - 1].cap });
+  }
+
+  deduped.sort((a, b) => b.burstMin - a.burstMin);
+  return deduped;
+}
 
 function loadSettings() {
   try {
@@ -310,7 +383,8 @@ function sanitizeSettings(obj) {
     chartMaxPoints: Math.max(100, Number(obj.chartMaxPoints) || DEFAULT_SETTINGS.chartMaxPoints),
     chartYMinUa: Math.max(0.001, Number(obj.chartYMinUa) || DEFAULT_SETTINGS.chartYMinUa),
     chartYMaxUa: Math.max(1, Number(obj.chartYMaxUa) || DEFAULT_SETTINGS.chartYMaxUa),
-    sleepWindowSize: Math.max(1, Math.round(Number(obj.sleepWindowSize) || DEFAULT_SETTINGS.sleepWindowSize))
+    sleepWindowSize: Math.max(1, Math.round(Number(obj.sleepWindowSize) || DEFAULT_SETTINGS.sleepWindowSize)),
+    overallCapRules: parseOverallCapRules(obj.overallCapRules)
   };
 }
 
@@ -322,6 +396,7 @@ function updateConfigSummary() {
   document.getElementById("cfgRssiFilter").innerText = settings.enableRssiFilter ? "On" : "Off";
   document.getElementById("cfgRssiMin").innerText = settings.rssiMinDbm;
   document.getElementById("cfgChartRange").innerText = `${settings.chartYMinUa} to ${settings.chartYMaxUa}`;
+  document.getElementById("cfgOverallRules").innerText = formatOverallCapRules(settings.overallCapRules);
 }
 
 function populateConfigForm() {
@@ -338,6 +413,7 @@ function populateConfigForm() {
   document.getElementById("cfg_chart_max_points").value = settings.chartMaxPoints;
   document.getElementById("cfg_chart_y_min_ua").value = settings.chartYMinUa;
   document.getElementById("cfg_chart_y_max_ua").value = settings.chartYMaxUa;
+  document.getElementById("cfg_overall_cap_rules").value = rulesToTextarea(settings.overallCapRules);
 }
 
 function readConfigForm() {
@@ -354,7 +430,8 @@ function readConfigForm() {
     rssiMinDbm: document.getElementById("cfg_rssi_min_dbm").value,
     chartMaxPoints: document.getElementById("cfg_chart_max_points").value,
     chartYMinUa: document.getElementById("cfg_chart_y_min_ua").value,
-    chartYMaxUa: document.getElementById("cfg_chart_y_max_ua").value
+    chartYMaxUa: document.getElementById("cfg_chart_y_max_ua").value,
+    overallCapRules: document.getElementById("cfg_overall_cap_rules").value
   });
 }
 
@@ -417,10 +494,10 @@ function updateLastBarcodeLabel(text) {
 }
 
 function getOverallCap(burstCount) {
-  for (const rule of OVERALL_CAP_RULES) {
+  for (const rule of settings.overallCapRules) {
     if (burstCount > rule.burstMin) return rule.cap;
   }
-  return 30;
+  return settings.overallCapRules.length ? settings.overallCapRules[settings.overallCapRules.length - 1].cap : 30;
 }
 
 function resetIdStateForNewTest() {
