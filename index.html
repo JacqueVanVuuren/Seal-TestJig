@@ -4,48 +4,74 @@
 <meta charset="UTF-8">
 <title>BLE Automated Power Test + ThingsBoard</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://unpkg.com/html5-qrcode"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+window.__firebase = { initializeApp, getDatabase, ref, set, onValue };
+</script>
+
 <style>
 body { background:#0f172a; color:#e2e8f0; font-family:Arial; padding:20px; }
 .card { background:#1e293b; padding:15px; border-radius:10px; margin-bottom:10px; }
 button { padding:10px; border:none; border-radius:6px; background:#3b82f6; color:white; cursor:pointer; margin-right:5px; margin-top:5px; }
+button.secondary { background:#475569; }
+button.success { background:#16a34a; }
+button.warn { background:#d97706; }
 input { padding:6px; margin:5px; border-radius:6px; border:none; }
 .pass { color:lime; font-weight:bold; }
 .fail { color:red; font-weight:bold; }
-label { display:inline-block; width:140px; }
+label { display:inline-block; width:180px; }
 #manualButtons { margin-top:10px; }
 .statusBox { margin-top:10px; padding:8px; background:#0f172a; border-radius:6px; }
 .small { font-size:12px; color:#94a3b8; }
+.row { display:flex; flex-wrap:wrap; gap:16px; }
+.col { flex:1; min-width:320px; }
+.mono { font-family:monospace; word-break:break-all; }
+.hidden { display:none !important; }
 
-/* Barcode popup */
-#barcodeModal {
+/* Modal */
+.modal {
   display: none;
   position: fixed;
   z-index: 9999;
-  left: 0;
-  top: 0;
-  width: 100%;
-  height: 100%;
+  left: 0; top: 0;
+  width: 100%; height: 100%;
   background: rgba(0,0,0,0.75);
 }
-#barcodeModalContent {
+.modal-content {
   background: #1e293b;
-  margin: 10% auto;
+  margin: 6% auto;
   padding: 20px;
   border-radius: 12px;
-  width: 90%;
-  max-width: 500px;
+  width: 92%;
+  max-width: 650px;
   box-shadow: 0 6px 20px rgba(0,0,0,0.5);
 }
-#barcodeInput {
-  width: calc(100% - 20px);
+.modal-content input {
+  width: calc(100% - 24px);
   font-size: 18px;
   padding: 12px;
   margin-top: 10px;
   margin-bottom: 15px;
 }
-#barcodeStatus {
+#barcodeStatus, #phoneWaitStatus {
   margin-top: 10px;
   color: #94a3b8;
+}
+#phoneReader {
+  width: 100%;
+  max-width: 420px;
+  border-radius: 8px;
+  overflow: hidden;
+  margin-top: 10px;
+}
+#phoneQrCanvas {
+  background:#fff;
+  padding:8px;
+  border-radius:8px;
 }
 </style>
 </head>
@@ -59,68 +85,133 @@ label { display:inline-block; width:140px; }
   <p id="loginStatus"></p>
 </div>
 
-<div class="card" id="testCard">
-  Device Serial: <input id="deviceSerial"><br><br>
+<!-- MAIN APP AREA -->
+<div id="pcApp">
+  <div class="card" id="testCard">
+    Device Serial: <input id="deviceSerial"><br><br>
 
-  <button id="connectPowerPortBtn">Connect Power COM</button>
-  <button id="connectIdPortBtn">Connect ID COM</button>
-  <button id="connect">Start Test</button>
+    <button id="connectPowerPortBtn">Connect Power COM</button>
+    <button id="connectIdPortBtn">Connect ID COM</button>
+    <button id="connect">Start Test</button>
 
-  <div class="statusBox">
-    <div>Power Port: <span id="powerPortStatus">Not connected</span></div>
-    <div>ID Port: <span id="idPortStatus">Not connected</span></div>
-    <div>Last ID Seen: <span id="lastSeenId">-</span></div>
-    <div>Last RSSI Seen: <span id="lastSeenRssi">-</span></div>
-    <div>Peak-Matched ID: <span id="peakMatchedId">-</span></div>
-    <div>ID Window: <span id="idWindowStatus">Idle</span></div>
-    <div>Last Barcode Label: <span id="lastBarcodeLabel">-</span></div>
+    <div class="statusBox">
+      <div>Power Port: <span id="powerPortStatus">Not connected</span></div>
+      <div>ID Port: <span id="idPortStatus">Not connected</span></div>
+      <div>Last ID Seen: <span id="lastSeenId">-</span></div>
+      <div>Last RSSI Seen: <span id="lastSeenRssi">-</span></div>
+      <div>Peak-Matched ID: <span id="peakMatchedId">-</span></div>
+      <div>ID Window: <span id="idWindowStatus">Idle</span></div>
+      <div>Last Barcode Label: <span id="lastBarcodeLabel">-</span></div>
+    </div>
+
+    <p>Max Burst: <span id="maxValue">0</span> µA</p>
+    <p>Sleep Avg: <span id="sleepAvg">0</span> µA</p>
+    <p>Overall Avg: <span id="overallAvg">0</span> µA</p>
+    <p>Burst Count: <span id="burstCount">0</span></p>
+
+    <p>Result: <span id="testResult">WAITING</span></p>
+
+    <div id="manualButtons" style="display:none;">
+      <button id="retryBtn">Retry</button>
+      <button id="sendFailBtn">Send Failure</button>
+    </div>
+
+    <p class="small">
+      ID format expected on second COM port: RSSI:-60 ID:11479E73A94E6B58
+    </p>
+
+    <canvas id="adcChart" height="30"></canvas>
   </div>
 
-  <p>Max Burst: <span id="maxValue">0</span> µA</p>
-  <p>Sleep Avg: <span id="sleepAvg">0</span> µA</p>
-  <p>Overall Avg: <span id="overallAvg">0</span> µA</p>
-  <p>Burst Count: <span id="burstCount">0</span></p>
-
-  <p>Result: <span id="testResult">WAITING</span></p>
-
-  <div id="manualButtons" style="display:none;">
-    <button id="retryBtn">Retry</button>
-    <button id="sendFailBtn">Send Failure</button>
+  <div class="card">
+    <h3>Phone Scanner Session</h3>
+    <div class="row">
+      <div class="col">
+        <p class="small">
+          Technician scans this QR once at the start of the day. If the phone closes or refreshes, scan the same QR again.
+        </p>
+        <div><b>Session Room:</b> <span id="phoneRoomDisplay" class="mono">-</span></div>
+        <div><b>Sync Status:</b> <span id="syncStatus">Local only</span></div>
+        <div><b>Phone Link:</b></div>
+        <div id="phoneLinkDisplay" class="mono small">-</div>
+        <button id="copyPhoneLinkBtn">Copy Phone Link</button>
+        <button id="regenPhoneRoomBtn" class="secondary">New Day Session</button>
+      </div>
+      <div class="col">
+        <canvas id="phoneQrCanvas"></canvas>
+      </div>
+    </div>
   </div>
 
-  <p class="small">
-    ID format expected on second COM port: RSSI:-60 ID:11479E73A94E6B58
-  </p>
-
-  <canvas id="adcChart" height="30"></canvas>
+  <div class="card">
+    <h3>Test History</h3>
+    <table border="1" width="100%">
+      <tr>
+        <th>Time</th>
+        <th>Serial</th>
+        <th>Barcode Label</th>
+        <th>Sleep Avg</th>
+        <th>Burst</th>
+        <th>Overall Avg</th>
+        <th>Result</th>
+      </tr>
+      <tbody id="history"></tbody>
+    </table>
+  </div>
 </div>
 
-<div class="card">
-  <h3>Test History</h3>
-  <table border="1" width="100%">
-    <tr>
-      <th>Time</th>
-      <th>Serial</th>
-      <th>Barcode Label</th>
-      <th>Sleep Avg</th>
-      <th>Burst</th>
-      <th>Overall Avg</th>
-      <th>Result</th>
-    </tr>
-    <tbody id="history"></tbody>
-  </table>
+<!-- PHONE PAGE AREA -->
+<div id="phoneApp" class="hidden">
+  <div class="card">
+    <h3>Phone Barcode Scanner</h3>
+    <div>Room: <span id="phoneModeRoom" class="mono">-</span></div>
+    <div>Status: <span id="phoneModeStatus">Ready</span></div>
+    <div>Last Scan: <span id="phoneModeLastScan">-</span></div>
+    <button id="startPhoneScannerBtn" class="success">Start Camera Scanner</button>
+    <button id="stopPhoneScannerBtn" class="secondary">Stop Scanner</button>
+    <div id="phoneReader"></div>
+    <p class="small">
+      Keep this page open. After each test passes on the PC, scan the board barcode here.
+    </p>
+  </div>
 </div>
 
-<!-- Barcode Modal -->
-<div id="barcodeModal">
-  <div id="barcodeModalContent">
+<!-- CHOOSE BARCODE INPUT MODE MODAL -->
+<div id="barcodeChoiceModal" class="modal">
+  <div class="modal-content">
+    <h3>Test Passed</h3>
+    <p>Please choose how to scan the board barcode.</p>
+    <button id="choosePcScannerBtn" class="success">Use PC Scanner</button>
+    <button id="choosePhoneScannerBtn" class="warn">Use Phone Scanner</button>
+    <button id="barcodeChoiceCancelBtn" class="secondary">Cancel</button>
+    <div id="barcodeChoiceStatus" class="small"></div>
+  </div>
+</div>
+
+<!-- PC BARCODE INPUT MODAL -->
+<div id="barcodeModal" class="modal">
+  <div class="modal-content">
     <h3>Scan Barcode</h3>
     <p>Test passed. Please scan the board barcode now.</p>
     <input id="barcodeInput" type="text" placeholder="Scan barcode here">
     <br>
     <button id="barcodeSaveBtn">Save Barcode</button>
-    <button id="barcodeCancelBtn">Cancel</button>
+    <button id="barcodeCancelBtn" class="secondary">Cancel</button>
     <div id="barcodeStatus">Waiting for barcode scan...</div>
+  </div>
+</div>
+
+<!-- PHONE WAIT MODAL -->
+<div id="phoneWaitModal" class="modal">
+  <div class="modal-content">
+    <h3>Waiting For Phone Barcode</h3>
+    <p>Use the phone scanner page to scan the board barcode.</p>
+    <div><b>Room:</b> <span id="phoneWaitRoom" class="mono">-</span></div>
+    <div><b>Link:</b></div>
+    <div id="phoneWaitLink" class="mono small">-</div>
+    <div id="phoneWaitStatus">Waiting for next phone scan...</div>
+    <br>
+    <button id="phoneWaitCancelBtn" class="secondary">Cancel</button>
   </div>
 </div>
 
@@ -133,26 +224,38 @@ label { display:inline-block; width:140px; }
 const SERVER = "https://thingsboard.intarget.mobi";
 const USERNAME = "dman@ioti.mobi";
 
+// -------- Firebase for phone -> PC sync --------
+// Fill this in for live phone scanning
+const firebaseConfig = {
+  apiKey: "",
+  authDomain: "",
+  databaseURL: "",
+  projectId: "",
+  storageBucket: "",
+  messagingSenderId: "",
+  appId: ""
+};
+
 // -------- Serial settings --------
 const POWER_PORT_BAUD = 115200;
 const ID_PORT_BAUD = 115200;
 
 // -------- Test timing --------
-const TEST_DURATION_MS = 60000;      // 15000 = 15 sec, 60000 = 60 sec, 150000 = 150 sec
+const TEST_DURATION_MS = 15000;
 
 // -------- ID matching window --------
-const ID_CAPTURE_PAST_MS = 400;      // look this far back from burst
-const ID_CAPTURE_FUTURE_MS = 400;    // look this far forward from burst
-const ID_EVENT_HISTORY_MS = 10000;   // keep ID history this long
+const ID_CAPTURE_PAST_MS = 400;
+const ID_CAPTURE_FUTURE_MS = 400;
+const ID_EVENT_HISTORY_MS = 10000;
 
 // -------- Electrical thresholds --------
-const SLEEP_THRESHOLD_UA = 200;      // sleep average must stay below this
-const BURST_THRESHOLD_UA = 600;      // must exceed this to count as a burst
-const MIN_CURRENT_UA = 0.1;          // clamp minimum current for log scale chart
+const SLEEP_THRESHOLD_UA = 200;
+const BURST_THRESHOLD_UA = 500;
+const MIN_CURRENT_UA = 0.1;
 
 // -------- Optional ID filtering --------
-const ENABLE_RSSI_FILTER = false;    // true = only accept IDs stronger than threshold below
-const RSSI_MIN_DBM = -70;            // only used if ENABLE_RSSI_FILTER = true
+const ENABLE_RSSI_FILTER = false;
+const RSSI_MIN_DBM = -70;
 
 // -------- Chart settings --------
 const CHART_MAX_POINTS = 2000;
@@ -163,16 +266,20 @@ const CHART_Y_MAX_UA = 25000;
 const SLEEP_WINDOW_SIZE = 20;
 
 // -------- Overall average caps by burst count --------
-// Format: if burstCount > burstMin, overall average must be <= cap
 const OVERALL_CAP_RULES = [
-  { burstMin: 45, cap: 120 },
-  { burstMin: 40, cap: 110 },
-  { burstMin: 35, cap: 100 },
-  { burstMin: 30, cap: 90 },
-  { burstMin: 25, cap: 80 },
-  { burstMin: 20, cap: 70 },
-  { burstMin: -1, cap: 60 } // default
+  { burstMin: 45, cap: 75 },
+  { burstMin: 40, cap: 70 },
+  { burstMin: 35, cap: 65 },
+  { burstMin: 30, cap: 60 },
+  { burstMin: 25, cap: 55 },
+  { burstMin: 20, cap: 40 },
+  { burstMin: -1, cap: 30 }
 ];
+
+// -------- Daily phone session --------
+const PHONE_SESSION_STORAGE_KEY = "sealProfilerPhoneSessionV1";
+const PHONE_SESSION_PREFIX = "seal-room";
+const PHONE_SESSION_DATE_FORMAT = new Date().toISOString().slice(0, 10);
 
 // ============================================================
 // ===================== RUNTIME STATE ========================
@@ -203,69 +310,15 @@ let idCaptureWindowActive = false;
 let idCaptureWindowEnd = 0;
 let idWindowEvents = [];
 
-// ============================================================
-// ======================== CHART =============================
-// ============================================================
-
-const ctx = document.getElementById('adcChart').getContext('2d');
-const chart = new Chart(ctx, {
-  type: 'line',
-  data: {
-    labels: [],
-    datasets: [{
-      label: 'Current (µA)',
-      data: [],
-      borderColor: 'red',
-      backgroundColor: 'rgba(255,0,0,0.2)',
-      fill: true
-    }]
-  },
-  options: {
-    animation: false,
-    responsive: true,
-    scales: {
-      y: {
-        type: 'logarithmic',
-        min: CHART_Y_MIN_UA,
-        max: CHART_Y_MAX_UA,
-        ticks: {
-          callback: function(value) {
-            return value + ' µA';
-          }
-        }
-      }
-    }
-  }
-});
-
-// ============================================================
-// ========================= LOGIN ============================
-// ============================================================
-
-document.getElementById("loginBtn").onclick = async () => {
-  const password = document.getElementById("password").value;
-  document.getElementById("loginStatus").innerText = "Logging in...";
-
-  try {
-    const res = await fetch(SERVER + "/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: USERNAME, password })
-    });
-
-    if (!res.ok) {
-      document.getElementById("loginStatus").innerText = "❌ Failed";
-      return;
-    }
-
-    jwtToken = (await res.json()).token;
-    document.getElementById("loginStatus").innerText = "✅ Logged in";
-    document.getElementById("loginCard").style.display = "none";
-  } catch (e) {
-    document.getElementById("loginStatus").innerText = "❌ Error";
-    console.error(e);
-  }
-};
+// phone sync
+let syncRoom = "";
+let syncEnabled = false;
+let db = null;
+let phoneBarcodeRef = null;
+let phoneScanCounterRef = null;
+let phonePresenceRef = null;
+let lastPhoneScanSeen = null;
+let html5QrScanner = null;
 
 // ============================================================
 // ======================== HELPERS ===========================
@@ -299,9 +352,7 @@ function updateLastBarcodeLabel(text) {
 
 function getOverallCap(burstCount) {
   for (const rule of OVERALL_CAP_RULES) {
-    if (burstCount > rule.burstMin) {
-      return rule.cap;
-    }
+    if (burstCount > rule.burstMin) return rule.cap;
   }
   return 30;
 }
@@ -327,6 +378,163 @@ function resetUiForNewTest() {
   idWindowEvents = [];
 }
 
+function generateDailyRoom() {
+  const rand = Math.random().toString(36).slice(2, 8).toUpperCase();
+  return `${PHONE_SESSION_PREFIX}-${PHONE_SESSION_DATE_FORMAT}-${rand}`;
+}
+
+function loadOrCreateDailyRoom() {
+  const saved = localStorage.getItem(PHONE_SESSION_STORAGE_KEY);
+  if (saved) {
+    try {
+      const obj = JSON.parse(saved);
+      if (obj.date === PHONE_SESSION_DATE_FORMAT && obj.room) {
+        return obj.room;
+      }
+    } catch (e) {}
+  }
+  const room = generateDailyRoom();
+  localStorage.setItem(PHONE_SESSION_STORAGE_KEY, JSON.stringify({
+    date: PHONE_SESSION_DATE_FORMAT,
+    room
+  }));
+  return room;
+}
+
+function forceNewDailyRoom() {
+  const room = generateDailyRoom();
+  localStorage.setItem(PHONE_SESSION_STORAGE_KEY, JSON.stringify({
+    date: PHONE_SESSION_DATE_FORMAT,
+    room
+  }));
+  return room;
+}
+
+function getPhoneLink() {
+  const url = new URL(window.location.href);
+  url.searchParams.set("phoneMode", "1");
+  url.searchParams.set("room", syncRoom);
+  return url.toString();
+}
+
+function setSyncStatus(text) {
+  const el = document.getElementById("syncStatus");
+  if (el) el.innerText = text;
+}
+
+function updatePhoneSessionUi() {
+  const link = getPhoneLink();
+  const roomEls = [
+    document.getElementById("phoneRoomDisplay"),
+    document.getElementById("phoneWaitRoom"),
+    document.getElementById("phoneModeRoom")
+  ];
+  roomEls.forEach(el => { if (el) el.innerText = syncRoom; });
+
+  const linkEls = [
+    document.getElementById("phoneLinkDisplay"),
+    document.getElementById("phoneWaitLink")
+  ];
+  linkEls.forEach(el => { if (el) el.innerText = link; });
+
+  const qrCanvas = document.getElementById("phoneQrCanvas");
+  if (qrCanvas) {
+    QRCode.toCanvas(qrCanvas, link, { width: 220 }, function (err) {
+      if (err) console.error(err);
+    });
+  }
+}
+
+async function copyPhoneLink() {
+  try {
+    await navigator.clipboard.writeText(getPhoneLink());
+    alert("Phone link copied.");
+  } catch (e) {
+    console.error(e);
+    alert("Could not copy phone link.");
+  }
+}
+
+function applyQueryMode() {
+  const params = new URLSearchParams(window.location.search);
+  const isPhoneMode = params.get("phoneMode") === "1";
+  const room = params.get("room");
+
+  if (room) syncRoom = room;
+
+  if (isPhoneMode) {
+    document.getElementById("pcApp").classList.add("hidden");
+    document.getElementById("loginCard").classList.add("hidden");
+    document.getElementById("phoneApp").classList.remove("hidden");
+    return true;
+  } else {
+    document.getElementById("pcApp").classList.remove("hidden");
+    document.getElementById("phoneApp").classList.add("hidden");
+    return false;
+  }
+}
+
+// ============================================================
+// ==================== FIREBASE SYNC =========================
+// ============================================================
+
+async function setupRealtimeSync() {
+  try {
+    const values = Object.values(firebaseConfig).filter(Boolean);
+    if (values.length !== 7) {
+      syncEnabled = false;
+      setSyncStatus("Local only (Firebase not configured)");
+      return;
+    }
+
+    const { initializeApp, getDatabase, ref, onValue } = window.__firebase;
+    const app = initializeApp(firebaseConfig);
+    db = getDatabase(app);
+
+    phoneBarcodeRef = ref(db, "sealProfilerRooms/" + syncRoom + "/latestBarcode");
+    phoneScanCounterRef = ref(db, "sealProfilerRooms/" + syncRoom + "/scanCounter");
+    phonePresenceRef = ref(db, "sealProfilerRooms/" + syncRoom + "/phoneStatus");
+
+    onValue(phoneBarcodeRef, (snapshot) => {
+      const data = snapshot.val();
+      if (!data || !data.barcode || !data.ts) return;
+      lastPhoneScanSeen = data;
+      const lastScanEl = document.getElementById("phoneModeLastScan");
+      if (lastScanEl) lastScanEl.innerText = data.barcode;
+    });
+
+    syncEnabled = true;
+    setSyncStatus("Live sync connected");
+  } catch (e) {
+    console.error("Realtime sync setup failed:", e);
+    syncEnabled = false;
+    setSyncStatus("Sync error");
+  }
+}
+
+async function pushPhoneBarcode(barcode) {
+  if (!syncEnabled || !phoneBarcodeRef) {
+    alert("Phone sync not configured. Fill in Firebase config first.");
+    return;
+  }
+
+  const payload = {
+    barcode,
+    ts: Date.now(),
+    sender: "phone"
+  };
+
+  await window.__firebase.set(phoneBarcodeRef, payload);
+}
+
+async function updatePhonePresence(text) {
+  if (!syncEnabled || !phonePresenceRef) return;
+  await window.__firebase.set(phonePresenceRef, {
+    status: text,
+    ts: Date.now()
+  });
+}
+
 // ============================================================
 // ====================== ID PROCESSING =======================
 // ============================================================
@@ -342,10 +550,7 @@ function parseIdLine(line) {
     raw: line.trim()
   };
 
-  if (ENABLE_RSSI_FILTER && parsed.rssi < RSSI_MIN_DBM) {
-    return null;
-  }
-
+  if (ENABLE_RSSI_FILTER && parsed.rssi < RSSI_MIN_DBM) return null;
   return parsed;
 }
 
@@ -367,17 +572,12 @@ function getBestIdEvent(events) {
   if (!events || events.length === 0) return null;
 
   let best = events[0];
-
   for (let i = 1; i < events.length; i++) {
     const e = events[i];
-    if (
-      e.rssi > best.rssi ||
-      (e.rssi === best.rssi && e.timestamp > best.timestamp)
-    ) {
+    if (e.rssi > best.rssi || (e.rssi === best.rssi && e.timestamp > best.timestamp)) {
       best = e;
     }
   }
-
   return best;
 }
 
@@ -457,9 +657,7 @@ async function startIdReadLoop() {
 
       for (const line of lines) {
         const parsed = parseIdLine(line);
-        if (parsed) {
-          rememberIdEvent(parsed);
-        }
+        if (parsed) rememberIdEvent(parsed);
       }
     }
   } catch (e) {
@@ -475,10 +673,115 @@ async function startIdReadLoop() {
 }
 
 // ============================================================
-// ===================== BARCODE POPUP ========================
+// ===================== CHART ================================
 // ============================================================
 
-function askForBarcodeAfterPass() {
+const ctx = document.getElementById('adcChart').getContext('2d');
+const chart = new Chart(ctx, {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [{
+      label: 'Current (µA)',
+      data: [],
+      borderColor: 'red',
+      backgroundColor: 'rgba(255,0,0,0.2)',
+      fill: true
+    }]
+  },
+  options: {
+    animation: false,
+    responsive: true,
+    scales: {
+      y: {
+        type: 'logarithmic',
+        min: CHART_Y_MIN_UA,
+        max: CHART_Y_MAX_UA,
+        ticks: {
+          callback: function(value) {
+            return value + ' µA';
+          }
+        }
+      }
+    }
+  }
+});
+
+// ============================================================
+// ========================= LOGIN ============================
+// ============================================================
+
+document.getElementById("loginBtn").onclick = async () => {
+  const password = document.getElementById("password").value;
+  document.getElementById("loginStatus").innerText = "Logging in...";
+
+  try {
+    const res = await fetch(SERVER + "/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: USERNAME, password })
+    });
+
+    if (!res.ok) {
+      document.getElementById("loginStatus").innerText = "❌ Failed";
+      return;
+    }
+
+    jwtToken = (await res.json()).token;
+    document.getElementById("loginStatus").innerText = "✅ Logged in";
+    document.getElementById("loginCard").style.display = "none";
+  } catch (e) {
+    document.getElementById("loginStatus").innerText = "❌ Error";
+    console.error(e);
+  }
+};
+
+// ============================================================
+// ===================== BARCODE MODALS =======================
+// ============================================================
+
+function askBarcodeMethodAfterPass() {
+  return new Promise((resolve) => {
+    const modal = document.getElementById("barcodeChoiceModal");
+    const choosePcBtn = document.getElementById("choosePcScannerBtn");
+    const choosePhoneBtn = document.getElementById("choosePhoneScannerBtn");
+    const cancelBtn = document.getElementById("barcodeChoiceCancelBtn");
+    const status = document.getElementById("barcodeChoiceStatus");
+
+    modal.style.display = "block";
+    status.innerText = syncEnabled
+      ? "Phone scanner ready."
+      : "Phone scanner unavailable until Firebase config is filled in.";
+
+    function cleanup() {
+      choosePcBtn.onclick = null;
+      choosePhoneBtn.onclick = null;
+      cancelBtn.onclick = null;
+      modal.style.display = "none";
+    }
+
+    choosePcBtn.onclick = () => {
+      cleanup();
+      resolve("pc");
+    };
+
+    choosePhoneBtn.onclick = () => {
+      if (!syncEnabled) {
+        status.innerText = "Phone sync not configured yet. Use PC scanner or fill Firebase config.";
+        return;
+      }
+      cleanup();
+      resolve("phone");
+    };
+
+    cancelBtn.onclick = () => {
+      cleanup();
+      resolve(null);
+    };
+  });
+}
+
+function askForPcBarcode() {
   return new Promise((resolve) => {
     const modal = document.getElementById("barcodeModal");
     const input = document.getElementById("barcodeInput");
@@ -489,7 +792,6 @@ function askForBarcodeAfterPass() {
     modal.style.display = "block";
     input.value = "";
     status.innerText = "Waiting for barcode scan...";
-
     setTimeout(() => input.focus(), 100);
 
     function cleanup() {
@@ -520,6 +822,38 @@ function askForBarcodeAfterPass() {
         e.preventDefault();
         saveBtn.click();
       }
+    };
+  });
+}
+
+function waitForPhoneBarcode() {
+  return new Promise((resolve) => {
+    const modal = document.getElementById("phoneWaitModal");
+    const cancelBtn = document.getElementById("phoneWaitCancelBtn");
+    const status = document.getElementById("phoneWaitStatus");
+
+    modal.style.display = "block";
+    updatePhoneSessionUi();
+    status.innerText = "Waiting for next phone scan...";
+
+    const startTs = Date.now();
+
+    const interval = setInterval(() => {
+      if (lastPhoneScanSeen && lastPhoneScanSeen.ts > startTs) {
+        cleanup();
+        resolve(lastPhoneScanSeen.barcode);
+      }
+    }, 250);
+
+    function cleanup() {
+      clearInterval(interval);
+      cancelBtn.onclick = null;
+      modal.style.display = "none";
+    }
+
+    cancelBtn.onclick = () => {
+      cleanup();
+      resolve(null);
     };
   });
 }
@@ -599,9 +933,7 @@ async function startTest() {
 
           if (current >= BURST_THRESHOLD_UA) {
             burstCount++;
-            if (!idCaptureWindowActive) {
-              startIdCaptureWindow();
-            }
+            if (!idCaptureWindowActive) startIdCaptureWindow();
           }
 
           document.getElementById("burstCount").innerText = burstCount;
@@ -616,7 +948,6 @@ async function startTest() {
 
           totalSum += current;
           totalCount++;
-
           document.getElementById("overallAvg").innerText = Math.round(totalSum / totalCount);
           document.getElementById("maxValue").innerText = Math.round(maxBurst);
         });
@@ -627,9 +958,7 @@ async function startTest() {
       }
 
       if (Date.now() - start >= TEST_DURATION_MS) {
-        if (idCaptureWindowActive) {
-          finishIdCaptureWindow();
-        }
+        if (idCaptureWindowActive) finishIdCaptureWindow();
 
         const sleepAvg = sleepWindow.length
           ? sleepWindow.reduce((a, b) => a + b, 0) / sleepWindow.length
@@ -677,10 +1006,22 @@ async function startTest() {
         if (finalResult === "FAIL") {
           document.getElementById("manualButtons").style.display = "block";
         } else {
-          const barcodeLabel = await askForBarcodeAfterPass();
+          const method = await askBarcodeMethodAfterPass();
+          if (!method) {
+            alert("Barcode step cancelled. PASS result not sent.");
+            break;
+          }
+
+          let barcodeLabel = null;
+
+          if (method === "pc") {
+            barcodeLabel = await askForPcBarcode();
+          } else if (method === "phone") {
+            barcodeLabel = await waitForPhoneBarcode();
+          }
 
           if (!barcodeLabel) {
-            alert("Barcode scan cancelled. PASS result not sent to ThingsBoard.");
+            alert("Barcode scan cancelled. PASS result not sent.");
             break;
           }
 
@@ -719,42 +1060,6 @@ async function startTest() {
     powerReader = null;
   }
 }
-
-// ============================================================
-// ========================= BUTTONS ==========================
-// ============================================================
-
-document.getElementById("connectPowerPortBtn").onclick = connectPowerPort;
-document.getElementById("connectIdPortBtn").onclick = connectIdPort;
-document.getElementById("connect").onclick = startTest;
-
-document.getElementById("retryBtn").onclick = () => {
-  startTest();
-};
-
-document.getElementById("sendFailBtn").onclick = async () => {
-  if (lastTestData) {
-    const d = lastTestData;
-    try {
-      await sendToThingsBoard(
-        d.serial,
-        "",
-        d.sleepAvg,
-        d.burstCount,
-        d.maxBurst,
-        d.overallAvg,
-        d.finalResult,
-        d.reasons
-      );
-      addHistory(d.serial, "", d.sleepAvg, d.burstCount, d.maxBurst, d.overallAvg, d.finalResult);
-      clearSerialOnly();
-      document.getElementById("manualButtons").style.display = "none";
-    } catch (e) {
-      console.error(e);
-      alert("❌ Send to ThingsBoard failed. Test history not saved.");
-    }
-  }
-};
 
 // ============================================================
 // ==================== THINGSBOARD SEND ======================
@@ -827,6 +1132,140 @@ function addHistory(serial, barcodeLabel, sleepAvg, burstCount, peak, avg, resul
   `;
   document.getElementById("history").appendChild(tr);
 }
+
+// ============================================================
+// ====================== PHONE MODE ==========================
+// ============================================================
+
+async function startPhoneCameraScanner() {
+  if (html5QrScanner) return;
+
+  const formatsToSupport = [
+    Html5QrcodeSupportedFormats.CODE_128,
+    Html5QrcodeSupportedFormats.CODE_39,
+    Html5QrcodeSupportedFormats.CODE_93,
+    Html5QrcodeSupportedFormats.EAN_13,
+    Html5QrcodeSupportedFormats.EAN_8,
+    Html5QrcodeSupportedFormats.UPC_A,
+    Html5QrcodeSupportedFormats.UPC_E,
+    Html5QrcodeSupportedFormats.QR_CODE
+  ];
+
+  html5QrScanner = new Html5Qrcode("phoneReader");
+
+  try {
+    await updatePhonePresence("scanner starting");
+    await html5QrScanner.start(
+      { facingMode: "environment" },
+      { fps: 10, qrbox: { width: 280, height: 180 }, formatsToSupport },
+      async (decodedText) => {
+        const clean = (decodedText || "").trim();
+        if (!clean) return;
+        document.getElementById("phoneModeLastScan").innerText = clean;
+        document.getElementById("phoneModeStatus").innerText = "Sending...";
+        await pushPhoneBarcode(clean);
+        document.getElementById("phoneModeStatus").innerText = "Scan sent";
+      },
+      () => {}
+    );
+    await updatePhonePresence("scanner active");
+    document.getElementById("phoneModeStatus").innerText = "Scanner active";
+  } catch (e) {
+    console.error("Phone scanner start failed:", e);
+    document.getElementById("phoneModeStatus").innerText = "Scanner failed";
+    alert("Could not start phone camera scanner.");
+    html5QrScanner = null;
+  }
+}
+
+async function stopPhoneCameraScanner() {
+  if (!html5QrScanner) return;
+  try {
+    await html5QrScanner.stop();
+    await html5QrScanner.clear();
+    await updatePhonePresence("scanner stopped");
+  } catch (e) {
+    console.error("Phone scanner stop failed:", e);
+  }
+  html5QrScanner = null;
+  document.getElementById("phoneModeStatus").innerText = "Stopped";
+}
+
+// ============================================================
+// ======================== BUTTONS ===========================
+// ============================================================
+
+document.getElementById("connectPowerPortBtn").onclick = connectPowerPort;
+document.getElementById("connectIdPortBtn").onclick = connectIdPort;
+document.getElementById("connect").onclick = startTest;
+
+document.getElementById("retryBtn").onclick = () => {
+  startTest();
+};
+
+document.getElementById("sendFailBtn").onclick = async () => {
+  if (lastTestData) {
+    const d = lastTestData;
+    try {
+      await sendToThingsBoard(
+        d.serial,
+        "",
+        d.sleepAvg,
+        d.burstCount,
+        d.maxBurst,
+        d.overallAvg,
+        d.finalResult,
+        d.reasons
+      );
+      addHistory(d.serial, "", d.sleepAvg, d.burstCount, d.maxBurst, d.overallAvg, d.finalResult);
+      clearSerialOnly();
+      document.getElementById("manualButtons").style.display = "none";
+    } catch (e) {
+      console.error(e);
+      alert("❌ Send to ThingsBoard failed. Test history not saved.");
+    }
+  }
+};
+
+document.getElementById("copyPhoneLinkBtn").onclick = copyPhoneLink;
+document.getElementById("regenPhoneRoomBtn").onclick = async () => {
+  syncRoom = forceNewDailyRoom();
+  updatePhoneSessionUi();
+  await setupRealtimeSync();
+  alert("New day session created.");
+};
+
+const startPhoneScannerBtn = document.getElementById("startPhoneScannerBtn");
+if (startPhoneScannerBtn) {
+  startPhoneScannerBtn.onclick = startPhoneCameraScanner;
+}
+const stopPhoneScannerBtn = document.getElementById("stopPhoneScannerBtn");
+if (stopPhoneScannerBtn) {
+  stopPhoneScannerBtn.onclick = stopPhoneCameraScanner;
+}
+
+// ============================================================
+// ======================== STARTUP ===========================
+// ============================================================
+
+(async function init() {
+  const isPhoneMode = applyQueryMode();
+
+  if (!syncRoom) {
+    syncRoom = loadOrCreateDailyRoom();
+  }
+
+  updatePhoneSessionUi();
+  await setupRealtimeSync();
+
+  if (isPhoneMode) {
+    document.getElementById("phoneModeRoom").innerText = syncRoom;
+  }
+})();
+
+window.addEventListener("beforeunload", () => {
+  stopPhoneCameraScanner();
+});
 </script>
 
 </body>
