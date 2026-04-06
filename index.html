@@ -22,7 +22,6 @@ window.addEventListener("load", async () => {
 
 
 document.getElementById("voiceCmdBtn").onclick = startVoiceCommands;
-document.getElementById("voiceCmdStopBtn").onclick = stopVoiceCommands;
 </script>
 
 <style>
@@ -190,8 +189,7 @@ label { display:inline-block; width:240px; vertical-align:top; }
     <button id="connect">Start Test</button>
     <button id="stopEspBtn" class="secondary">Stop Test</button>
 
-<button id="voiceCmdBtn" class="success">Start Voice</button>
-<button id="voiceCmdStopBtn" class="secondary">Stop Voice</button>
+<button id="voiceCmdBtn" class="success">Voice Always On</button>
 
     <button id="openConfigBtn2" class="secondary">Configuration</button>
 
@@ -408,7 +406,6 @@ const SERVER = "https://thingsboard.intarget.mobi";
 const USERNAME = "dman@ioti.mobi";
 const CONFIG_PASSWORD = "12345";
 const SETTINGS_KEY = "blePowerTesterSettingsV3";
-const VOICE_ENABLED_KEY = "blePowerTesterVoiceEnabled";
 
 // -------- Serial settings --------
 const POWER_PORT_BAUD = 460800;
@@ -482,7 +479,6 @@ let voiceRecognitionBlockedByPermission = false;
 let voiceRecognitionLastStartAt = 0;
 let voiceRecognitionRearmCount = 0;
 let isProgramming = false;
-let voiceCommandProcessingEnabled = true;
 let voiceOutputActive = false;
 let voiceOutputResumeTimer = null;
 let deepgramSocket = null;
@@ -496,6 +492,8 @@ let deepgramSessionShouldStayOn = false;
 let deepgramSessionRunning = false;
 let deepgramTranscriptBuffer = "";
 let deepgramLastHeardAt = 0;
+let lastExecutedVoiceCommand = "";
+let lastExecutedVoiceCommandAt = 0;
 
 function setProgrammerStatus(text) {
   document.getElementById("programmerStatus").innerText = text;
@@ -560,17 +558,10 @@ let aiVoiceAudio = null;
 
 function disableVoiceCommandProcessing() {
   voiceOutputActive = true;
-  voiceCommandProcessingEnabled = false;
-
-  if (voiceOutputResumeTimer) {
-    clearTimeout(voiceOutputResumeTimer);
-    voiceOutputResumeTimer = null;
-  }
-
   setVoiceStatus("Speaking...");
 }
 
-function enableVoiceCommandProcessingAfterDelay(delayMs = 3000) {
+function enableVoiceCommandProcessingAfterDelay(delayMs = 0) {
   if (voiceOutputResumeTimer) {
     clearTimeout(voiceOutputResumeTimer);
   }
@@ -578,18 +569,10 @@ function enableVoiceCommandProcessingAfterDelay(delayMs = 3000) {
   voiceOutputResumeTimer = setTimeout(() => {
     voiceOutputResumeTimer = null;
     voiceOutputActive = false;
-
     if (deepgramSessionShouldStayOn && deepgramSessionRunning) {
-      voiceCommandProcessingEnabled = true;
       setVoiceStatus("Listening");
-    } else if (deepgramSessionShouldStayOn) {
-      voiceCommandProcessingEnabled = false;
-      setVoiceStatus("Reconnecting...");
-    } else {
-      voiceCommandProcessingEnabled = false;
-      setVoiceStatus("Stopped");
     }
-  }, delayMs);
+  }, Math.max(0, delayMs));
 }
 
 async function speakText(text) {
@@ -610,7 +593,7 @@ async function speakText(text) {
       await speakWithBrowserVoice(msg);
     }
   } finally {
-    enableVoiceCommandProcessingAfterDelay(3000);
+    enableVoiceCommandProcessingAfterDelay(0);
   }
 }
 
@@ -726,8 +709,25 @@ function speakTestResult(result, reasonsText) {
   }
 
   if (r === "FAIL") {
-    if (reasons) {
-      speakText("Fail. " + reasons.replace(/;/g, ". "));
+    const reasonList = reasons
+      ? reasons.split(";").map(x => String(x || "").trim()).filter(Boolean)
+      : [];
+
+    const spoken = [];
+    for (const reason of reasonList) {
+      spoken.push(reason);
+
+      if (/No B L E ID detected/i.test(reason)) {
+        spoken.push("No BLE ID was detected in the time window. Ensure the tag is placed close to the jig, and confirm that the RSSI threshold in the configuration page is not set too low.");
+      } else if (/Sleep Avg\s*>|Overall Avg\s*>/i.test(reason)) {
+        spoken.push("The device failed due to exceeding the current threshold. Ensure the threshold values are correctly configured on the configuration page.");
+      } else if (/Burst\s*</i.test(reason)) {
+        spoken.push("Please check the firmware, power path, and threshold configuration.");
+      }
+    }
+
+    if (spoken.length) {
+      speakText("Fail. " + spoken.join(" "));
     } else {
       speakText("Fail");
     }
@@ -1098,10 +1098,20 @@ async function chooseFirmwareAndProgram() {
 
 async function runProgramSequence() {
   isProgramming = true;
+
   try {
     return await chooseFirmwareAndProgram();
   } finally {
     isProgramming = false;
+
+    if (deepgramSessionShouldStayOn && deepgramSessionRunning) {
+      setVoiceStatus("Listening");
+    } else if (deepgramSessionShouldStayOn) {
+      setVoiceStatus("Reconnecting...");
+      scheduleDeepgramReconnect(500);
+    } else {
+      setVoiceStatus("Stopped");
+    }
   }
 }
 
@@ -1525,20 +1535,6 @@ async function startIdReadLoop() {
   }
 }
 
-function saveVoiceEnabledPreference(enabled) {
-  try {
-    localStorage.setItem(VOICE_ENABLED_KEY, enabled ? "1" : "0");
-  } catch (e) {}
-}
-
-function loadVoiceEnabledPreference() {
-  try {
-    return localStorage.getItem(VOICE_ENABLED_KEY) === "1";
-  } catch (e) {
-    return false;
-  }
-}
-
 function setVoiceStatus(text) {
   const el = document.getElementById("voiceStatus");
   if (el) el.innerText = "Voice commands: " + text;
@@ -1653,15 +1649,41 @@ function getSupportedRecordingMimeType() {
   return "";
 }
 
-async function executeVoiceCommand(rawText) {
-  const cmd = normalizeVoiceCommand(rawText);
 
-  if (isProgramming) {
-    console.log("Voice command ignored during programming");
-    setVoiceStatus("Programming in progress...");
+
+function shouldExecuteVoiceCommand(cmd) {
+  const now = Date.now();
+  if (cmd === lastExecutedVoiceCommand && (now - lastExecutedVoiceCommandAt) < 1500) {
     return false;
   }
+  lastExecutedVoiceCommand = cmd;
+  lastExecutedVoiceCommandAt = now;
+  return true;
+}
+
+async function speakPromptKeepListening(text) {
+  const msg = String(text || "").trim();
+  if (!msg) return;
+  try {
+    if (settings.AI_VOICE_ENABLED && settings.ELEVENLABS_API_KEY && settings.ELEVENLABS_VOICE_ID) {
+      try {
+        await speakWithElevenLabs(msg);
+      } catch (e) {
+        console.error("ElevenLabs voice failed, falling back to browser voice:", e);
+        await speakWithBrowserVoice(msg);
+      }
+    } else {
+      await speakWithBrowserVoice(msg);
+    }
+  } catch (e) {
+    console.error("Prompt playback failed:", e);
+  }
+}
+
+async function executeVoiceCommand(rawText) {
+  const cmd = normalizeVoiceCommand(rawText);
   if (!cmd) return false;
+  if (!shouldExecuteVoiceCommand(cmd)) return false;
 
   console.log("Voice heard:", cmd);
 
@@ -1673,12 +1695,8 @@ async function executeVoiceCommand(rawText) {
 
   if (cmd.includes("program") || cmd.includes("programming")) {
     setVoiceStatus('Heard: "' + cmd + '" → PROGRAM');
-    const btn = document.getElementById("programBtn");
-    if (btn) {
-      btn.click();
-      return true;
-    }
-    return false;
+    document.getElementById("programBtn").click();
+    return true;
   }
 
   if (cmd.includes("connect") && cmd.includes("power")) {
@@ -1712,8 +1730,6 @@ async function handleDeepgramTranscriptMessage(data) {
 
   deepgramLastHeardAt = Date.now();
 
-  if (voiceOutputActive || !voiceCommandProcessingEnabled) return;
-
   if (data.is_final) {
     deepgramTranscriptBuffer = (deepgramTranscriptBuffer + " " + transcript).trim();
   } else {
@@ -1727,14 +1743,10 @@ async function handleDeepgramTranscriptMessage(data) {
   if (!readyText) return;
 
   deepgramTranscriptBuffer = "";
-  voiceCommandProcessingEnabled = false;
-  try {
-    await executeVoiceCommand(readyText);
-  } finally {
-    if (!voiceOutputActive && deepgramSessionRunning && deepgramSessionShouldStayOn) {
-      voiceCommandProcessingEnabled = true;
-      setVoiceStatus("Listening");
-    }
+  await executeVoiceCommand(readyText);
+
+  if (deepgramSessionRunning && deepgramSessionShouldStayOn) {
+    setVoiceStatus("Listening");
   }
 }
 
@@ -1794,7 +1806,6 @@ async function startDeepgramVoiceSession(isReconnect = false) {
         voiceRecognitionSupported = true;
         voiceRecognitionShouldStayOn = true;
         voiceRecognitionBlockedByPermission = false;
-        voiceCommandProcessingEnabled = true;
         deepgramReconnectAttempts = 0;
         startDeepgramKeepAlive();
         setVoiceStatus("Listening");
@@ -1815,16 +1826,11 @@ async function startDeepgramVoiceSession(isReconnect = false) {
           }
           if (data && data.type === "UtteranceEnd") {
             const pending = deepgramTranscriptBuffer.trim();
-            if (pending && !voiceOutputActive && voiceCommandProcessingEnabled) {
+            if (pending) {
               deepgramTranscriptBuffer = "";
-              voiceCommandProcessingEnabled = false;
-              try {
-                await executeVoiceCommand(pending);
-              } finally {
-                if (!voiceOutputActive && deepgramSessionRunning && deepgramSessionShouldStayOn) {
-                  voiceCommandProcessingEnabled = true;
-                  setVoiceStatus("Listening");
-                }
+              await executeVoiceCommand(pending);
+              if (deepgramSessionRunning && deepgramSessionShouldStayOn) {
+                setVoiceStatus("Listening");
               }
             }
             return;
@@ -1852,7 +1858,6 @@ async function startDeepgramVoiceSession(isReconnect = false) {
         if (deepgramSocket === socket) deepgramSocket = null;
 
         if (deepgramSessionShouldStayOn) {
-          voiceCommandProcessingEnabled = false;
           deepgramReconnectAttempts += 1;
           setVoiceStatus("Reconnecting...");
           scheduleDeepgramReconnect(Math.min(7000, 2000 + (deepgramReconnectAttempts * 1000)));
@@ -1884,7 +1889,6 @@ async function startDeepgramVoiceSession(isReconnect = false) {
     closeDeepgramSocket();
     deepgramSessionRunning = false;
     voiceRecognitionRunning = false;
-    voiceCommandProcessingEnabled = false;
     setVoiceStatus("Start failed");
     throw e;
   } finally {
@@ -1896,8 +1900,7 @@ function startVoiceCommands() {
   deepgramSessionShouldStayOn = true;
   voiceRecognitionShouldStayOn = true;
   voiceRecognitionBlockedByPermission = false;
-  saveVoiceEnabledPreference(true);
-
+  
   if (deepgramSessionRunning || deepgramConnectInProgress) {
     setVoiceStatus("Listening");
     return;
@@ -1919,8 +1922,7 @@ function stopVoiceCommands() {
   voiceRecognitionShouldStayOn = false;
   voiceRecognitionRunning = false;
   voiceRecognitionBlockedByPermission = false;
-  voiceCommandProcessingEnabled = false;
-  voiceOutputActive = false;
+    voiceOutputActive = false;
   deepgramTranscriptBuffer = "";
 
   if (voiceOutputResumeTimer) {
@@ -1933,8 +1935,7 @@ function stopVoiceCommands() {
     deepgramReconnectTimer = null;
   }
 
-  saveVoiceEnabledPreference(false);
-  stopDeepgramKeepAlive();
+    stopDeepgramKeepAlive();
   stopDeepgramRecorder();
   closeDeepgramSocket();
   deepgramSessionRunning = false;
@@ -2388,6 +2389,10 @@ document.getElementById("programBtn").onclick = async () => {
         !msg.includes("BreakError: Break received")) {
       alert("Programming failed: " + msg);
     }
+  } finally {
+    if (!isProgramming && deepgramSessionShouldStayOn && deepgramSessionRunning) {
+      setVoiceStatus("Listening");
+    }
   }
 };
 document.getElementById("loadFirmwareBtn").onclick = async () => {
@@ -2402,7 +2407,6 @@ document.getElementById("connect").onclick = startTest;
 document.getElementById("stopEspBtn").onclick = stopEspTest;
 document.getElementById("voiceCmdBtn").onclick = startVoiceCommands;
 window.addEventListener("load", () => { startVoiceCommands(); });
-document.getElementById("voiceCmdStopBtn").onclick = stopVoiceCommands;
 document.getElementById("retryBtn").onclick = () => { startTest(); };
 
 document.getElementById("sendFailBtn").onclick = async () => {
@@ -2440,12 +2444,9 @@ setProgrammerDetail("-");
 clearProgrammingLog();
 setInterval(() => cleanupExpiredIdEvents(true), 250);
 
-// Voice is only started from the Start Voice button to avoid browser mic permission pop-up loops.
-// While spoken feedback plays, the mic session stays alive and only command handling is disabled in software.
-
+// Voice is always kept on for the demo. Spoken feedback does not disable command listening.
 
 document.getElementById("voiceCmdBtn").onclick = startVoiceCommands;
-document.getElementById("voiceCmdStopBtn").onclick = stopVoiceCommands;
 </script>
 
 </body>
