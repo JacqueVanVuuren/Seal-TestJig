@@ -375,6 +375,11 @@ label { display:inline-block; width:240px; vertical-align:top; }
         <div class="small">For quick testing you can paste a Deepgram key directly here. For production, use a short-lived token from your backend instead of storing a long-lived key in the browser.</div>
       </div>
       <div class="cfg-item">
+        <label for="cfgStm32TargetBleName">STM32 Target BLE Name</label>
+        <input id="cfgStm32TargetBleName" type="text" placeholder="ISI Seal">
+        <div class="small">This name is sent to the STM32 scanner when you press Save Settings.</div>
+      </div>
+      <div class="cfg-item">
         <label for="cfgOverallCapRules">Overall Cap Rules by Burst Count</label>
         <textarea id="cfgOverallCapRules" placeholder="Example:
 45=150
@@ -432,6 +437,7 @@ const DEFAULT_SETTINGS = {
   DEEPGRAM_MODEL: "nova-3",
   DEEPGRAM_LANGUAGE: "en-US",
   DEEPGRAM_ENDPOINTING_MS: 300,
+  STM32_TARGET_BLE_NAME: "ISI Seal",
   OVERALL_CAP_RULES: [
     { burstMin: 45, cap: 150 },
     { burstMin: 40, cap: 140 },
@@ -1150,6 +1156,9 @@ function sanitizeSettings(obj) {
     ? obj.DEEPGRAM_LANGUAGE.trim()
     : s.DEEPGRAM_LANGUAGE;
   s.DEEPGRAM_ENDPOINTING_MS = toNum(obj.DEEPGRAM_ENDPOINTING_MS, s.DEEPGRAM_ENDPOINTING_MS, 0);
+  s.STM32_TARGET_BLE_NAME = typeof obj.STM32_TARGET_BLE_NAME === "string" && obj.STM32_TARGET_BLE_NAME.trim()
+    ? obj.STM32_TARGET_BLE_NAME.trim()
+    : s.STM32_TARGET_BLE_NAME;
 
   if (Array.isArray(obj.OVERALL_CAP_RULES)) {
     const parsed = obj.OVERALL_CAP_RULES
@@ -1233,6 +1242,7 @@ function applySettingsToUi() {
   document.getElementById("cfgDeepgramModel").value = settings.DEEPGRAM_MODEL;
   document.getElementById("cfgDeepgramLanguage").value = settings.DEEPGRAM_LANGUAGE;
   document.getElementById("cfgDeepgramEndpointingMs").value = settings.DEEPGRAM_ENDPOINTING_MS;
+  document.getElementById("cfgStm32TargetBleName").value = settings.STM32_TARGET_BLE_NAME;
   document.getElementById("cfgOverallCapRules").value = rulesToText(settings.OVERALL_CAP_RULES);
 
   applyChartSettings();
@@ -1263,6 +1273,7 @@ function readSettingsFromUi() {
     DEEPGRAM_MODEL: document.getElementById("cfgDeepgramModel").value.trim(),
     DEEPGRAM_LANGUAGE: document.getElementById("cfgDeepgramLanguage").value.trim(),
     DEEPGRAM_ENDPOINTING_MS: Number(document.getElementById("cfgDeepgramEndpointingMs").value),
+    STM32_TARGET_BLE_NAME: document.getElementById("cfgStm32TargetBleName").value.trim(),
     OVERALL_CAP_RULES: textToRules(document.getElementById("cfgOverallCapRules").value)
   };
   return sanitizeSettings(newSettings);
@@ -1457,6 +1468,27 @@ async function connectIdPort() {
   } catch (e) {
     console.error(e);
     alert("ID COM port not selected/opened.");
+  }
+}
+
+async function sendNameToStm32OverIdPort(name) {
+  if (!idPort || !idPort.writable) {
+    throw new Error("ID COM port is not connected.");
+  }
+
+  const trimmedName = String(name || "").trim();
+  if (!trimmedName) {
+    throw new Error("STM32 target BLE name is empty.");
+  }
+
+  const writer = idPort.writable.getWriter();
+  try {
+    const cmd = `NAME:${trimmedName}
+`;
+    await writer.write(new TextEncoder().encode(cmd));
+    console.log("Sent to STM32:", cmd.trim());
+  } finally {
+    writer.releaseLock();
   }
 }
 
@@ -2329,12 +2361,13 @@ document.getElementById("configResetBtn").onclick = () => {
   document.getElementById("configSaveStatus").innerText = "Defaults loaded. Click Save Settings to keep them.";
 };
 
-document.getElementById("configSaveBtn").onclick = () => {
+document.getElementById("configSaveBtn").onclick = async () => {
   try {
     settings = readSettingsFromUi();
     saveSettings();
     applySettingsToUi();
-    document.getElementById("configSaveStatus").innerText = "Settings saved.";
+    await sendNameToStm32OverIdPort(settings.STM32_TARGET_BLE_NAME);
+    document.getElementById("configSaveStatus").innerText = "Settings saved and BLE name sent to STM32.";
     closeConfigModal(); // save must close the window
   } catch (e) {
     console.error(e);
