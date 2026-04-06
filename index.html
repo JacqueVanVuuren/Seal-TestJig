@@ -475,6 +475,7 @@ let voiceRecognitionRestartTimer = null;
 let voiceRecognitionBlockedByPermission = false;
 let voiceRecognitionLastStartAt = 0;
 let voiceRecognitionRearmCount = 0;
+let isProgramming = false;
 let voiceCommandProcessingEnabled = true;
 let voiceOutputActive = false;
 let voiceOutputResumeTimer = null;
@@ -714,7 +715,7 @@ function speakTestResult(result, reasonsText) {
   const reasons = String(reasonsText || "").trim();
 
   if (r === "PASS") {
-    speakText("Pass");
+    speakText("Pass. Please scan barcode.");
     return;
   }
 
@@ -1090,7 +1091,12 @@ async function chooseFirmwareAndProgram() {
 }
 
 async function runProgramSequence() {
-  return chooseFirmwareAndProgram();
+  isProgramming = true;
+  try {
+    return await chooseFirmwareAndProgram();
+  } finally {
+    isProgramming = false;
+  }
 }
 
 async function stopEspTest() {
@@ -1425,7 +1431,7 @@ function finishIdCaptureWindow() {
     activeTestCapturedId = "";
     document.getElementById("deviceSerial").value = "";
     document.getElementById("peakMatchedId").innerText = "-";
-    setIdWindowStatus("No BLE ID detected in capture window");
+    setIdWindowStatus("No B L E ID detected in capture window");
   }
 
   idWindowEvents = [];
@@ -1617,6 +1623,12 @@ function getSupportedRecordingMimeType() {
 
 async function executeVoiceCommand(rawText) {
   const cmd = normalizeVoiceCommand(rawText);
+
+  if (isProgramming) {
+    console.log("Voice command ignored during programming");
+    setVoiceStatus("Programming in progress...");
+    return false;
+  }
   if (!cmd) return false;
 
   console.log("Voice heard:", cmd);
@@ -2135,7 +2147,7 @@ async function startTest() {
         const passId = !!serial;
 
         let reasons = [];
-        if (!passId) reasons.push("No BLE ID detected in capture window");
+        if (!passId) reasons.push("No B L E ID detected in capture window");
         if (!passSleep) reasons.push(`Sleep Avg > ${settings.SLEEP_THRESHOLD_UA} µA`);
         if (!passBurst) reasons.push(`Burst < ${settings.BURST_THRESHOLD_UA} µA`);
         if (!passOverall) reasons.push(`Overall Avg > ${overallCap} µA`);
