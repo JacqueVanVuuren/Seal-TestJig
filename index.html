@@ -718,7 +718,7 @@ function speakTestResult(result, reasonsText) {
       spoken.push(reason);
 
       if (/No B L E ID detected/i.test(reason)) {
-        spoken.push("No BLE ID was detected in the time window. Ensure the tag is placed close to the jig, and confirm that the RSSI threshold in the configuration page is not set too low.");
+        spoken.push("No B L E ID was detected in the time window. Ensure the tag is placed close to the jig, and confirm that the RSSI threshold in the configuration page is not set too low.");
       } else if (/Sleep Avg\s*>|Overall Avg\s*>/i.test(reason)) {
         spoken.push("The device failed due to exceeding the current threshold. Ensure the threshold values are correctly configured on the configuration page.");
       } else if (/Burst\s*</i.test(reason)) {
