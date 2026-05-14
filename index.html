@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <title>BLE Automated Power Test + ThingsBoard</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>
 // AUTO START VOICE ON LOAD
 window.addEventListener("load", async () => {
@@ -165,11 +167,50 @@ label { display:inline-block; width:240px; vertical-align:top; }
   overflow: hidden !important;
 }
 
+
+.phoneLinkToggleWrap { margin: 8px 0 12px 0; }
+#phoneLinkToggleBtn { display:none; }
+.phoneLinkCard { position:relative; }
+.phoneLinkCard.hiddenCard { display:none !important; }
+.phoneLinkRow { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-start; }
+.phoneLinkQrBox {
+  width:132px; min-width:132px; height:132px;
+  background:#fff; border-radius:10px; padding:6px;
+  display:flex; align-items:center; justify-content:center;
+}
+.phoneLinkDetails { flex:1; min-width:220px; }
+.phoneLinkCode {
+  font-family:monospace; font-size:18px; font-weight:bold;
+  letter-spacing:1px; color:#93c5fd; margin:6px 0;
+}
+.phoneLinkHint { font-size:12px; color:#94a3b8; margin-top:6px; }
+.phoneLinkCompact { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+
 </style>
 </head>
 <body>
 
 <h2>SEAL PROFILER DMAN@IOTI</h2>
+
+<div class="card phoneLinkCard" id="phoneLinkCard">
+  <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+    <h3 style="margin:0;">Phone Link</h3>
+    <div class="phoneLinkCompact">
+      <button id="refreshPhoneLinkBtn" class="secondary">Refresh QR</button>
+      <button id="hidePhoneLinkBtn" class="secondary">Hide</button>
+    </div>
+  </div>
+  <div class="phoneLinkRow">
+    <div id="phoneLinkQr" class="phoneLinkQrBox"></div>
+    <div class="phoneLinkDetails">
+      <div>Phone Link Status: <span id="phoneLinkStatus">Starting...</span></div>
+      <div>Daily Scan Code:</div>
+      <div id="phoneLinkCode" class="phoneLinkCode">---</div>
+      <div class="phoneLinkHint">Open the phone HTML, tap scan, and scan this QR once for the day. Internet is needed for the cloud signaling step.</div>
+    </div>
+  </div>
+</div>
+
 
 <div class="card" id="loginCard">
   <input id="password" type="password" placeholder="ThingsBoard Password">
@@ -193,6 +234,7 @@ label { display:inline-block; width:240px; vertical-align:top; }
 <button id="voiceCmdBtn" class="success">Voice Always On</button>
 
     <button id="openConfigBtn2" class="secondary">Configuration</button>
+    <button id="phoneLinkToggleBtn" class="secondary">Show Phone Link</button>
 
     <div id="voiceStatus" class="voiceStatus">Voice commands: Idle</div>
 
@@ -210,6 +252,8 @@ label { display:inline-block; width:240px; vertical-align:top; }
         <div>ID Window: <span id="idWindowStatus">Idle</span></div>
         <div>Overall Cap In Use: <span id="overallCapStatus">-</span></div>
         <div>Last Barcode Label: <span id="lastBarcodeLabel">-</span></div>
+        <div>Phone Link: <span id="phoneLinkInlineStatus">Not linked</span></div>
+        <div>NFC Status: <span id="nfcStatus">Idle</span></div>
       </div>
 
       <div class="card metricsCard" style="flex:0.8;">
@@ -267,7 +311,7 @@ label { display:inline-block; width:240px; vertical-align:top; }
 <div id="barcodeModal" class="modal">
   <div class="modal-content">
     <h3>Scan Barcode</h3>
-    <p>Please scan the board barcode before the test starts.</p>
+    <p>Scan the board barcode now. You can use the PC scanner, type it manually, or use the phone if linked.</p>
     <input id="barcodeInput" type="text" placeholder="Scan barcode here">
     <br>
     <button id="barcodeSaveBtn">Save Barcode</button>
@@ -1454,6 +1498,7 @@ function resetUiForNewTest() {
   setProgrammerStatus("Idle");
   setProgrammerDetail("-");
   updateLastBarcodeLabel("");
+  setNfcStatus("Idle");
   clearBleEventLog();
 
   lastTestData = null;
@@ -2096,6 +2141,193 @@ document.getElementById("loginBtn").onclick = async () => {
   }
 };
 
+
+function setNfcStatus(text) {
+  const el = document.getElementById("nfcStatus");
+  if (el) el.innerText = text || "Idle";
+}
+
+let phonePeer = null;
+let phoneConn = null;
+let phonePcId = "";
+let phoneQr = null;
+let pendingPhoneRequests = new Map();
+
+function makeShortPcCode() {
+  const saved = localStorage.getItem("blePhonePcCode");
+  if (saved && /^[A-Z0-9]{6}$/.test(saved)) return saved;
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let out = "";
+  for (let i = 0; i < 6; i++) out += chars[Math.floor(Math.random() * chars.length)];
+  localStorage.setItem("blePhonePcCode", out);
+  return out;
+}
+
+function setPhoneLinkStatus(text, linked = false) {
+  const el = document.getElementById("phoneLinkStatus");
+  const inline = document.getElementById("phoneLinkInlineStatus");
+  if (el) el.innerText = text;
+  if (inline) inline.innerText = linked ? "Linked" : text;
+}
+
+function hidePhoneLinkCard() {
+  const card = document.getElementById("phoneLinkCard");
+  const btn = document.getElementById("phoneLinkToggleBtn");
+  if (card) card.classList.add("hiddenCard");
+  if (btn) btn.style.display = "inline-block";
+  localStorage.setItem("blePhoneLinkHidden", "1");
+}
+
+function showPhoneLinkCard() {
+  const card = document.getElementById("phoneLinkCard");
+  const btn = document.getElementById("phoneLinkToggleBtn");
+  if (card) card.classList.remove("hiddenCard");
+  if (btn) btn.style.display = "none";
+  localStorage.removeItem("blePhoneLinkHidden");
+}
+
+function renderPhoneQr(text) {
+  const box = document.getElementById("phoneLinkQr");
+  if (!box) return;
+  box.innerHTML = "";
+  if (typeof QRCode === "undefined") {
+    box.textContent = "QR unavailable";
+    return;
+  }
+  phoneQr = new QRCode(box, {
+    text,
+    width: 120,
+    height: 120,
+    correctLevel: QRCode.CorrectLevel.L
+  });
+}
+
+function resetPendingPhoneRequests(errText) {
+  const msg = errText || "Phone disconnected";
+  for (const [id, entry] of pendingPhoneRequests.entries()) {
+    clearTimeout(entry.timer);
+    entry.reject(new Error(msg));
+  }
+  pendingPhoneRequests.clear();
+}
+
+function initPhoneLink() {
+  if (typeof Peer === "undefined") {
+    setPhoneLinkStatus("Peer library failed");
+    return;
+  }
+
+  phonePcId = "blepc-" + makeShortPcCode();
+  document.getElementById("phoneLinkCode").innerText = makeShortPcCode();
+  renderPhoneQr("BLEPC:" + phonePcId);
+
+  setPhoneLinkStatus("Waiting for phone scan...");
+  phonePeer = new Peer(phonePcId);
+
+  phonePeer.on("open", () => {
+    setPhoneLinkStatus("Waiting for phone scan...");
+  });
+
+  phonePeer.on("connection", (conn) => {
+    if (phoneConn) {
+      try { phoneConn.close(); } catch (e) {}
+    }
+    phoneConn = conn;
+    wirePhoneConnection(conn);
+  });
+
+  phonePeer.on("error", (err) => {
+    console.error("Peer error:", err);
+    setPhoneLinkStatus("Link error");
+  });
+
+  if (localStorage.getItem("blePhoneLinkHidden") === "1") {
+    hidePhoneLinkCard();
+  }
+}
+
+function refreshPhoneLink() {
+  try { if (phoneConn) phoneConn.close(); } catch (e) {}
+  try { if (phonePeer) phonePeer.destroy(); } catch (e) {}
+  phoneConn = null;
+  phonePeer = null;
+  resetPendingPhoneRequests("Phone link reset");
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let out = "";
+  for (let i = 0; i < 6; i++) out += chars[Math.floor(Math.random() * chars.length)];
+  localStorage.setItem("blePhonePcCode", out);
+  showPhoneLinkCard();
+  initPhoneLink();
+}
+
+function wirePhoneConnection(conn) {
+  conn.on("open", () => {
+    setPhoneLinkStatus("Phone linked", true);
+    hidePhoneLinkCard();
+    conn.send({ type: "hello_from_pc", pcId: phonePcId });
+  });
+
+  conn.on("data", (data) => {
+    if (!data || typeof data !== "object") return;
+    if (data.type === "barcode_result" || data.type === "nfc_result") {
+      const entry = pendingPhoneRequests.get(data.requestId);
+      if (!entry) return;
+      clearTimeout(entry.timer);
+      pendingPhoneRequests.delete(data.requestId);
+      if (data.ok === false) entry.reject(new Error(data.error || "Phone request failed"));
+      else entry.resolve(data);
+      return;
+    }
+    if (data.type === "phone_status") {
+      setPhoneLinkStatus(data.text || "Phone linked", true);
+      return;
+    }
+  });
+
+  conn.on("close", () => {
+    phoneConn = null;
+    resetPendingPhoneRequests("Phone disconnected");
+    setPhoneLinkStatus("Disconnected");
+    showPhoneLinkCard();
+  });
+
+  conn.on("error", (err) => {
+    console.error("Phone connection error:", err);
+  });
+}
+
+function sendPhoneRequest(type, payload = {}, timeoutMs = 120000) {
+  return new Promise((resolve, reject) => {
+    if (!phoneConn || !phoneConn.open) {
+      reject(new Error("Phone is not linked."));
+      return;
+    }
+    const requestId = "req-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
+    const timer = setTimeout(() => {
+      pendingPhoneRequests.delete(requestId);
+      reject(new Error("Phone request timed out."));
+    }, timeoutMs);
+    pendingPhoneRequests.set(requestId, { resolve, reject, timer });
+    phoneConn.send(Object.assign({ type, requestId }, payload));
+  });
+}
+
+async function getBarcodeForTest() {
+  return askForPcBarcode();
+}
+
+async function requestPhoneNfcWrite(serial) {
+  if (!(phoneConn && phoneConn.open)) {
+    setNfcStatus("Phone not linked");
+    return { ok: false, skipped: true };
+  }
+  setNfcStatus("Waiting for phone...");
+  const res = await sendPhoneRequest("request_nfc", { serial }, 180000);
+  setNfcStatus(res && res.message ? res.message : "Written");
+  return res;
+}
+
+
 function askForPcBarcode() {
   return new Promise((resolve) => {
     const modal = document.getElementById("barcodeModal");
@@ -2103,13 +2335,18 @@ function askForPcBarcode() {
     const saveBtn = document.getElementById("barcodeSaveBtn");
     const cancelBtn = document.getElementById("barcodeCancelBtn");
     const status = document.getElementById("barcodeStatus");
+    const phoneLinked = !!(phoneConn && phoneConn.open);
+    let active = true;
 
     modal.style.display = "block";
     input.value = "";
-    status.innerText = "Waiting for barcode scan...";
+    status.innerText = phoneLinked
+      ? "Scan with PC scanner, enter manually, or scan on phone."
+      : "Waiting for barcode scan...";
     setTimeout(() => input.focus(), 100);
 
     function cleanup() {
+      active = false;
       saveBtn.onclick = null;
       cancelBtn.onclick = null;
       input.onkeydown = null;
@@ -2138,6 +2375,27 @@ function askForPcBarcode() {
         saveBtn.click();
       }
     };
+
+    if (phoneLinked) {
+      setProgrammerStatus("Waiting for barcode...");
+      sendPhoneRequest("request_barcode", {}, 180000)
+        .then((res) => {
+          if (!active) return;
+          const barcode = String((res && res.barcode) || "").trim();
+          if (!barcode) return;
+          input.value = barcode;
+          status.innerText = "Barcode received from phone.";
+          updateLastBarcodeLabel(barcode);
+          setTimeout(() => {
+            if (active) saveBtn.click();
+          }, 150);
+        })
+        .catch((err) => {
+          if (!active) return;
+          console.error("Phone barcode request failed:", err);
+          status.innerText = "Phone barcode failed. Use scanner or type manually.";
+        });
+    }
   });
 }
 
@@ -2147,15 +2405,8 @@ async function startTest() {
     return;
   }
 
-  const barcodeLabel = await askForPcBarcode();
-  if (!barcodeLabel) {
-    alert("Barcode scan cancelled. Test not started.");
-    return;
-  }
-
   resetUiForNewTest();
   testStopRequested = false;
-  updateLastBarcodeLabel(barcodeLabel);
 
   if (!powerPort) await connectPowerPort();
   if (!powerPort || !powerPort.readable || !powerPort.writable) {
@@ -2307,7 +2558,6 @@ async function startTest() {
 
         lastTestData = {
           serial,
-          barcodeLabel,
           sleepAvg,
           burstCount,
           maxBurst,
@@ -2321,6 +2571,15 @@ async function startTest() {
           document.getElementById("manualButtons").style.display = "block";
           document.getElementById("sendFailBtn").disabled = !serial;
         } else {
+          const barcodeLabel = await getBarcodeForTest();
+
+          if (!barcodeLabel) {
+            alert("Barcode scan cancelled. PASS result not sent.");
+            break;
+          }
+
+          updateLastBarcodeLabel(barcodeLabel);
+
           try {
             await sendToThingsBoard(
               serial,
@@ -2335,6 +2594,14 @@ async function startTest() {
 
             addHistory(serial, barcodeLabel, sleepAvg, burstCount, maxBurst, overallAvg, finalResult);
             clearSerialOnly();
+
+            try {
+              await requestPhoneNfcWrite(serial);
+            } catch (nfcErr) {
+              console.error("Phone NFC failed:", nfcErr);
+              setNfcStatus("Failed");
+              alert("ThingsBoard send worked, but phone NFC failed: " + (nfcErr.message || nfcErr));
+            }
           } catch (e) {
             console.error(e);
             alert("❌ Send to ThingsBoard failed. Test history not saved.");
@@ -2534,7 +2801,7 @@ document.getElementById("sendFailBtn").onclick = async () => {
     try {
       await sendToThingsBoard(
         d.serial,
-        d.barcodeLabel || lastBarcodeLabel || "",
+        "",
         d.sleepAvg,
         d.burstCount,
         d.maxBurst,
@@ -2542,7 +2809,7 @@ document.getElementById("sendFailBtn").onclick = async () => {
         d.finalResult,
         d.reasons
       );
-      addHistory(d.serial, d.barcodeLabel || lastBarcodeLabel || "", d.sleepAvg, d.burstCount, d.maxBurst, d.overallAvg, d.finalResult);
+      addHistory(d.serial, "", d.sleepAvg, d.burstCount, d.maxBurst, d.overallAvg, d.finalResult);
       clearSerialOnly();
       document.getElementById("manualButtons").style.display = "none";
     } catch (e) {
@@ -2552,8 +2819,13 @@ document.getElementById("sendFailBtn").onclick = async () => {
   }
 };
 
+document.getElementById("phoneLinkToggleBtn").onclick = showPhoneLinkCard;
+document.getElementById("hidePhoneLinkBtn").onclick = hidePhoneLinkCard;
+document.getElementById("refreshPhoneLinkBtn").onclick = refreshPhoneLink;
+
 // Initial apply
 applySettingsToUi();
+initPhoneLink();
 setProgrammerStatus("Idle");
 setProgrammerDetail("-");
 clearProgrammingLog();
